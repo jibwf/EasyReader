@@ -1,0 +1,1641 @@
+package com.easyreader.elinkclient.ui
+
+import android.app.Application
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewModelScope
+import com.easyreader.elinkclient.core.AppConfig
+import com.easyreader.elinkclient.core.BookIdentity
+import com.easyreader.elinkclient.core.DeviceIdProvider
+import com.easyreader.elinkclient.core.DeviceProfile
+import com.easyreader.elinkclient.core.EinkRefreshMode
+import com.easyreader.elinkclient.core.EinkRefreshPolicy
+import com.easyreader.elinkclient.core.NetworkDisabledException
+import com.easyreader.elinkclient.core.NetworkGate
+import com.easyreader.elinkclient.core.RefreshAction
+import com.easyreader.elinkclient.core.WifiConnectivityMonitor
+import com.easyreader.elinkclient.data.model.BookCategoryItem
+import com.easyreader.elinkclient.data.model.BookItem
+import com.easyreader.elinkclient.data.model.ClientCacheStats
+import com.easyreader.elinkclient.data.model.LocalShelfBook
+import com.easyreader.elinkclient.data.model.OfflineCatalogItem
+import com.easyreader.elinkclient.data.model.OfflineTaskCreateRequest
+import com.easyreader.elinkclient.data.model.OfflineTaskItem
+import com.easyreader.elinkclient.data.model.SearchResultItem
+import com.easyreader.elinkclient.data.model.ServerCacheStats
+import com.easyreader.elinkclient.data.model.ServerFontItem
+import com.easyreader.elinkclient.data.model.SyncProgressItem
+import com.easyreader.elinkclient.data.model.SyncProgressUpsertRequest
+import com.easyreader.elinkclient.data.offline.OfflineDownloadManager
+import com.easyreader.elinkclient.data.offline.OfflineDownloadResult
+import com.easyreader.elinkclient.data.repository.ReaderRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+
+class EinkViewModel(application: Application) : AndroidViewModel(application) {
+    private val builtInFontOptions = listOf(
+        ReaderFontOption(
+            key = "builtin:serif",
+            name = "系统衬线",
+            fromServer = false,
+            downloaded = true,
+        ),
+        ReaderFontOption(
+            key = "builtin:sans",
+            name = "系统无衬线",
+            fromServer = false,
+            downloaded = true,
+        ),
+    )
+
+    private val networkGate = NetworkGate(application)
+    private val repository = ReaderRepository(application, networkGate = networkGate)
+    private val offlineDownloadManager = OfflineDownloadManager(repository)
+    private val wifiMonitor = WifiConnectivityMonitor(application)
+    private val prefs = application.getSharedPreferences(AppConfig.PREFS_NAME, Context.MODE_PRIVATE)
+    private val lowRamMode = DeviceProfile.isLowRamDevice(application)
+    private val refreshPolicy = EinkRefreshPolicy(
+        initialMode = if (lowRamMode) EinkRefreshMode.SPEED else EinkRefreshPolicy.detectDefaultMode(),
+    )
+
+    private var wifiFullSyncJob: Job? = null
+    private var lastProgressSyncAtMs = 0L
+    private val progressSyncCooldownMs = 45_000L
+    private val pendingSyncQueue = LinkedHashMap<String, SyncProgressUpsertRequest>()
+
+    private val _state = MutableStateFlow(
+        EinkUiState(
+            lowRamMode = lowRamMode,
+            refreshMode = refreshPolicy.mode,
+            refreshEveryTurns = refreshPolicy.mode.fullRefreshInterval,
+        )
+    )
+    val state: StateFlow<EinkUiState> = _state.asStateFlow()
+
+    init {
+        val deviceId = DeviceIdProvider(application).getOrCreate()
+        val savedBaseUrl = prefs.getString(AppConfig.KEY_BASE_URL, AppConfig.DEFAULT_BASE_URL)
+            ?: AppConfig.DEFAULT_BASE_URL
+        val savedUserId = prefs.getString(AppConfig.KEY_USER_ID, AppConfig.DEFAULT_USER_ID)
+            ?: AppConfig.DEFAULT_USER_ID
+        val savedFontStyle = prefs.getString(AppConfig.KEY_READER_FONT_STYLE, ReaderFontStyle.SERIF.name)
+            ?.let { name -> ReaderFontStyle.entries.firstOrNull { it.name == name } }
+            ?: ReaderFontStyle.SERIF
+        val savedFontKey = prefs.getString(AppConfig.KEY_READER_FONT_KEY, null)
+            ?: if (savedFontStyle == ReaderFontStyle.SANS) "builtin:sans" else "builtin:serif"
+        val savedFontSizeSp = prefs.getInt(AppConfig.KEY_READER_FONT_SIZE, 24).coerceIn(18, 36)
+        val savedLineSpacing = prefs.getFloat(AppConfig.KEY_READER_LINE_SPACING, 1.85f).coerceIn(1.3f, 2.4f)
+        val savedAutoTurnSpeed = AutoPageTurnSpeed.fromStorage(
+            prefs.getString(AppConfig.KEY_READER_AUTO_TURN_SPEED, null)
+        )
+        val savedSyncMode = SyncMode.fromStorage(prefs.getString(AppConfig.KEY_SYNC_POLICY, null))
+        val networkAvailable = networkGate.canUseNetwork()
+        pendingSyncQueue.clear()
+        pendingSyncQueue.putAll(loadPendingSyncQueue())
+
+        repository.updateBaseUrl(savedBaseUrl)
+        _state.value = _state.value.copy(
+            lowRamMode = lowRamMode,
+            baseUrl = repository.getCurrentBaseUrl(),
+            userId = savedUserId,
+            deviceId = deviceId,
+            networkMode = networkModeFor(networkAvailable),
+            syncMode = savedSyncMode,
+            isNetworkAvailable = networkAvailable,
+            readerFontStyle = savedFontStyle,
+            readerFontKey = savedFontKey,
+            readerFonts = builtInFontOptions,
+            readerFontSizeSp = savedFontSizeSp,
+            readerLineSpacing = savedLineSpacing,
+            autoPageTurnSpeed = savedAutoTurnSpeed,
+            pendingSyncCount = pendingSyncQueue.size,
+            refreshMode = refreshPolicy.mode,
+            refreshEveryTurns = refreshPolicy.mode.fullRefreshInterval,
+            lastSyncMessage = if (networkAvailable) "WiFi 已连接，等待全量同步" else "WiFi 未连接，离线阅读模式",
+        )
+
+        wifiMonitor.start()
+        observeWifiConnectivity()
+        refreshLocalBookshelf(showLoading = false)
+        refreshCacheStats(showLoading = false)
+        if (networkAvailable) {
+            scheduleWifiFullSync("启动检测到 WiFi")
+        }
+    }
+
+    override fun onCleared() {
+        wifiFullSyncJob?.cancel()
+        offlineDownloadManager.cancel()
+        repository.cancelNetworkRequests()
+        wifiMonitor.stop()
+        super.onCleared()
+    }
+
+    fun updateServerConfig(baseUrlInput: String, userIdInput: String) {
+        val normalizedBaseUrl = ReaderRepository.normalizeBaseUrl(baseUrlInput)
+        val normalizedUserId = userIdInput.trim().ifBlank { AppConfig.DEFAULT_USER_ID }
+        val previousUserId = _state.value.userId
+
+        prefs.edit()
+            .putString(AppConfig.KEY_BASE_URL, normalizedBaseUrl)
+            .putString(AppConfig.KEY_USER_ID, normalizedUserId)
+            .apply()
+
+        repository.updateBaseUrl(normalizedBaseUrl)
+
+        _state.update {
+            val networkAvailable = networkGate.canUseNetwork()
+            it.copy(
+                baseUrl = normalizedBaseUrl,
+                userId = normalizedUserId,
+                errorMessage = null,
+                isNetworkAvailable = networkAvailable,
+                networkMode = networkModeFor(networkAvailable),
+                lastSyncMessage = "配置已保存",
+            )
+        }
+
+        if (previousUserId != normalizedUserId) {
+            clearPendingSyncQueue("用户切换，待补传队列已清空")
+        }
+
+        refreshLocalBookshelf(showLoading = false)
+        refreshCacheStats(showLoading = false)
+        if (networkGate.canUseNetwork()) {
+            scheduleWifiFullSync("配置更新")
+        }
+    }
+
+    fun cycleSyncMode() {
+        val next = when (_state.value.syncMode) {
+            SyncMode.MANUAL_PROGRESS_ONLY -> SyncMode.AUTO_ON_WIFI
+            SyncMode.AUTO_ON_WIFI -> SyncMode.MANUAL_PROGRESS_ONLY
+        }
+        prefs.edit().putString(AppConfig.KEY_SYNC_POLICY, next.storageValue).apply()
+        _state.update {
+            it.copy(
+                syncMode = next,
+                lastSyncMessage = "进度同步策略：${next.label}",
+            )
+        }
+    }
+
+    fun refreshServerBooks(showLoading: Boolean = true) {
+        runRequest(
+            block = { repository.getBooks() },
+            onSuccess = { books ->
+                _state.update {
+                    it.copy(
+                        isLoading = if (showLoading) false else it.isLoading,
+                        errorMessage = null,
+                        serverBooks = books,
+                        lastSyncMessage = "服务器书架已刷新：${books.size} 本",
+                    )
+                }
+            },
+            onErrorPrefix = "刷新服务器书架失败",
+            showLoading = showLoading,
+        )
+    }
+
+    fun refreshBookCategories(showLoading: Boolean = false) {
+        runRequest(
+            block = { repository.getBookCategories().filter { !it.hidden } },
+            onSuccess = { categories ->
+                _state.update { state ->
+                    val selected = if (state.selectedCategory == "all") {
+                        "all"
+                    } else if (categories.any { it.name == state.selectedCategory }) {
+                        state.selectedCategory
+                    } else {
+                        "all"
+                    }
+                    state.copy(
+                        isLoading = if (showLoading) false else state.isLoading,
+                        errorMessage = null,
+                        bookCategories = categories,
+                        selectedCategory = selected,
+                    )
+                }
+            },
+            onErrorPrefix = "刷新服务器分类失败",
+            showLoading = showLoading,
+        )
+    }
+
+    fun setSelectedCategory(category: String) {
+        _state.update { it.copy(selectedCategory = category.trim().ifBlank { "all" }) }
+    }
+
+    fun setServerBookCategory(book: BookItem, categoryName: String) {
+        val normalized = categoryName.trim()
+        if (normalized.isBlank()) {
+            return
+        }
+        runRequest(
+            block = { repository.setBookCategory(book.id, normalized) },
+            onSuccess = {
+                _state.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        serverBooks = state.serverBooks.map { item ->
+                            if (item.id == book.id) item.copy(categoryName = normalized) else item
+                        },
+                        localBookshelf = state.localBookshelf.map { item ->
+                            if (item.bookUrl == book.bookUrl && item.sourceUrl == book.sourceUrl) {
+                                item.copy(categoryName = normalized)
+                            } else {
+                                item
+                            }
+                        },
+                        lastSyncMessage = "${book.name} 分类已更新为 $normalized",
+                    )
+                }
+                refreshBookCategories(showLoading = false)
+            },
+            onErrorPrefix = "更新分类失败",
+            showLoading = false,
+        )
+    }
+
+    fun refreshReaderFonts(showLoading: Boolean = false) {
+        runRequest(
+            block = {
+                val serverFonts = repository.getServerFonts()
+                val localPaths = repository.listDownloadedFontFiles()
+                serverFonts to localPaths
+            },
+            onSuccess = { (serverFonts, localPaths) ->
+                val options = buildReaderFontOptions(serverFonts, localPaths)
+                _state.update { state ->
+                    val selected = options.firstOrNull { it.key == state.readerFontKey } ?: options.first()
+                    val style = resolveReaderFontStyle(selected.key)
+                    prefs.edit()
+                        .putString(AppConfig.KEY_READER_FONT_KEY, selected.key)
+                        .putString(AppConfig.KEY_READER_FONT_STYLE, style.name)
+                        .apply()
+                    state.copy(
+                        isLoading = if (showLoading) false else state.isLoading,
+                        errorMessage = null,
+                        readerFonts = options,
+                        readerFontKey = selected.key,
+                        readerFontPath = selected.filePath,
+                        readerFontStyle = style,
+                        lastSyncMessage = "字体列表已刷新：服务器 ${serverFonts.size} 个，本地 ${localPaths.size} 个",
+                    )
+                }
+            },
+            onErrorPrefix = "刷新字体失败",
+            showLoading = showLoading,
+        )
+    }
+
+    fun refreshCacheStats(showLoading: Boolean = false) {
+        val networkAvailable = refreshNetworkAvailability()
+        runRequest(
+            block = {
+                val clientStats = repository.getClientCacheStats()
+                val serverStats = if (networkAvailable) {
+                    repository.getServerCacheStats()
+                } else {
+                    _state.value.serverCacheStats
+                }
+                serverStats to clientStats
+            },
+            onSuccess = { (serverStats, clientStats) ->
+                _state.update {
+                    it.copy(
+                        isLoading = if (showLoading) false else it.isLoading,
+                        errorMessage = null,
+                        serverCacheStats = serverStats,
+                        clientCacheStats = clientStats,
+                        serverCacheMessage = if (!networkAvailable) "离线模式：仅刷新本地缓存统计" else it.serverCacheMessage,
+                    )
+                }
+            },
+            onErrorPrefix = "刷新缓存统计失败",
+            showLoading = showLoading,
+        )
+    }
+
+    fun clearServerCache() {
+        runRequest(
+            block = {
+                val cleared = repository.clearServerCache(clearAll = true)
+                val latest = repository.getServerCacheStats()
+                cleared to latest
+            },
+            onSuccess = { (clearResult, latest) ->
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        serverCacheStats = latest,
+                        serverCacheMessage = "服务器缓存已清理：删除 ${clearResult.cleared} 条",
+                    )
+                }
+            },
+            onErrorPrefix = "清理服务器缓存失败",
+        )
+    }
+
+    fun applyReaderFont(fontKey: String) {
+        val selected = _state.value.readerFonts.firstOrNull { it.key == fontKey } ?: return
+        if (selected.fromServer && !selected.downloaded) {
+            _state.update { it.copy(errorMessage = "字体尚未下载") }
+            return
+        }
+        val style = resolveReaderFontStyle(selected.key)
+        prefs.edit()
+            .putString(AppConfig.KEY_READER_FONT_KEY, selected.key)
+            .putString(AppConfig.KEY_READER_FONT_STYLE, style.name)
+            .apply()
+        _state.update {
+            it.copy(
+                readerFontKey = selected.key,
+                readerFontPath = selected.filePath,
+                readerFontStyle = style,
+                lastSyncMessage = "字体已切换：${selected.name}",
+            )
+        }
+        applyRefreshAction(RefreshAction.FULL)
+    }
+
+    fun downloadAndApplyReaderFont(font: ServerFontItem) {
+        runRequest(
+            block = {
+                repository.downloadServerFont(font)
+                val serverFonts = repository.getServerFonts()
+                val localPaths = repository.listDownloadedFontFiles()
+                buildReaderFontOptions(serverFonts, localPaths)
+            },
+            onSuccess = { options ->
+                _state.update { state ->
+                    val selected = options.firstOrNull { it.key == "server:${font.id}" }
+                        ?: options.firstOrNull { it.key == state.readerFontKey }
+                        ?: options.first()
+                    val style = resolveReaderFontStyle(selected.key)
+                    prefs.edit()
+                        .putString(AppConfig.KEY_READER_FONT_KEY, selected.key)
+                        .putString(AppConfig.KEY_READER_FONT_STYLE, style.name)
+                        .apply()
+                    state.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        readerFonts = options,
+                        readerFontKey = selected.key,
+                        readerFontPath = selected.filePath,
+                        readerFontStyle = style,
+                        lastSyncMessage = "字体已下载并应用：${selected.name}",
+                    )
+                }
+                applyRefreshAction(RefreshAction.FULL)
+            },
+            onErrorPrefix = "下载字体失败",
+        )
+    }
+
+    fun deleteLocalReaderFont(filePath: String) {
+        if (filePath.isBlank()) {
+            return
+        }
+        runRequest(
+            block = {
+                repository.deleteLocalFontFile(filePath)
+                val serverFonts = if (repository.canUseNetwork()) {
+                    runCatching { repository.getServerFonts() }.getOrDefault(emptyList())
+                } else {
+                    emptyList()
+                }
+                val localPaths = repository.listDownloadedFontFiles()
+                buildReaderFontOptions(serverFonts, localPaths)
+            },
+            onSuccess = { options ->
+                _state.update { state ->
+                    val fallback = options.firstOrNull { it.key == "builtin:serif" } ?: options.first()
+                    val selected = options.firstOrNull { it.key == state.readerFontKey && it.filePath != filePath } ?: fallback
+                    val style = resolveReaderFontStyle(selected.key)
+                    prefs.edit()
+                        .putString(AppConfig.KEY_READER_FONT_KEY, selected.key)
+                        .putString(AppConfig.KEY_READER_FONT_STYLE, style.name)
+                        .apply()
+                    state.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        readerFonts = options,
+                        readerFontKey = selected.key,
+                        readerFontPath = selected.filePath,
+                        readerFontStyle = style,
+                        lastSyncMessage = "本地字体已删除",
+                    )
+                }
+                applyRefreshAction(RefreshAction.FULL)
+            },
+            onErrorPrefix = "删除本地字体失败",
+            showLoading = false,
+        )
+    }
+
+    fun refreshOfflineCatalog(showLoading: Boolean = true) {
+        val snapshot = _state.value
+        if (snapshot.userId.isBlank() || snapshot.deviceId.isBlank()) {
+            return
+        }
+        runRequest(
+            block = { repository.getOfflineCatalog(snapshot.userId, snapshot.deviceId) },
+            onSuccess = { catalog ->
+                _state.update {
+                    it.copy(
+                        isLoading = if (showLoading) false else it.isLoading,
+                        errorMessage = null,
+                        offlineCatalog = catalog,
+                        lastSyncMessage = "服务器离线目录已刷新：${catalog.size} 项",
+                    )
+                }
+            },
+            onErrorPrefix = "刷新服务器离线目录失败",
+            showLoading = showLoading,
+        )
+    }
+
+    fun autoSyncServerDataIfNeeded(force: Boolean = false) {
+        if (force && networkGate.canUseNetwork()) {
+            scheduleWifiFullSync("前台恢复")
+        }
+    }
+
+    fun refreshLocalBookshelf(showLoading: Boolean = true) {
+        runRequest(
+            block = { repository.getLocalBookshelf() },
+            onSuccess = { books ->
+                val localChapterMap = books.associate { book ->
+                    resolveBookKey(book.bookKey, book.sourceUrl, book.bookUrl) to book.lastReadChapter.coerceAtLeast(1)
+                }
+                _state.update {
+                    it.copy(
+                        isLoading = if (showLoading) false else it.isLoading,
+                        errorMessage = null,
+                        localBookshelf = books,
+                        readingChapterByBook = it.readingChapterByBook + localChapterMap,
+                    )
+                }
+            },
+            onErrorPrefix = "刷新本地书架失败",
+            showLoading = showLoading,
+        )
+    }
+
+    fun updateSearchKeyword(keyword: String) {
+        _state.update { it.copy(searchKeyword = keyword) }
+    }
+
+    fun searchBooksFromServer() {
+        val keyword = _state.value.searchKeyword.trim()
+        if (keyword.isBlank()) {
+            _state.update { it.copy(errorMessage = "请输入搜索关键词") }
+            return
+        }
+        runRequest(
+            block = { repository.searchBooks(keyword) },
+            onSuccess = { results ->
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        searchResults = results,
+                        lastSyncMessage = "搜索完成：${results.size} 条结果",
+                    )
+                }
+            },
+            onErrorPrefix = "搜索失败",
+        )
+    }
+
+    fun importSearchResultToDevice(item: SearchResultItem) {
+        val identity = getUserAndDevice() ?: return
+        runOfflinePipeline(
+            prepareBook = {
+                repository.addBookToServer(item)
+                repository.ensureLocalShelfBook(item)
+            },
+            createServerTask = { book ->
+                repository.createServerOfflineTask(
+                    userId = identity.first,
+                    deviceId = identity.second,
+                    bookKey = book.bookKey,
+                    bookUrl = book.bookUrl,
+                    sourceUrl = book.sourceUrl,
+                )
+            },
+            operationLabel = "搜索导入并缓存",
+        )
+    }
+
+    fun addServerBookToLocalShelf(book: BookItem) {
+        runRequest(
+            block = { repository.ensureLocalShelfBook(book) },
+            onSuccess = {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        lastSyncMessage = "已加入本地书架：${book.name}",
+                    )
+                }
+                refreshLocalBookshelf(showLoading = false)
+            },
+            onErrorPrefix = "加入本地书架失败",
+        )
+    }
+
+    fun offlineServerBookToDevice(book: BookItem) {
+        val identity = getUserAndDevice() ?: return
+        runOfflinePipeline(
+            prepareBook = { repository.ensureLocalShelfBook(book) },
+            createServerTask = {
+                repository.createServerOfflineTask(
+                    userId = identity.first,
+                    deviceId = identity.second,
+                    bookId = book.id,
+                    bookKey = book.bookKey,
+                )
+            },
+            operationLabel = "服务器书籍缓存到本地",
+        )
+    }
+
+    fun offlineLocalShelfBookToDevice(book: LocalShelfBook) {
+        val identity = getUserAndDevice() ?: return
+        runOfflinePipeline(
+            prepareBook = { book },
+            createServerTask = {
+                repository.createServerOfflineTask(
+                    userId = identity.first,
+                    deviceId = identity.second,
+                    bookKey = book.bookKey,
+                    bookUrl = book.bookUrl,
+                    sourceUrl = book.sourceUrl,
+                )
+            },
+            operationLabel = "本地书籍更新缓存",
+        )
+    }
+
+    fun refreshLocalBookCache(book: LocalShelfBook) {
+        offlineLocalShelfBookToDevice(book)
+    }
+
+    fun cancelOfflineDownload() {
+        offlineDownloadManager.cancel()
+        repository.cancelNetworkRequests()
+        _state.update {
+            it.copy(
+                offlineDownloadActive = false,
+                isLoading = false,
+                localCacheStatusMessage = "离线缓存已取消，已完成章节保留",
+                lastSyncMessage = "离线缓存已取消",
+            )
+        }
+    }
+
+    fun deleteLocalBook(book: LocalShelfBook) {
+        runRequest(
+            block = {
+                repository.deleteLocalBook(book.bookKey)
+                repository.getLocalBookshelf()
+            },
+            onSuccess = { shelf ->
+                _state.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        localBookshelf = shelf,
+                        readingChapterByBook = state.readingChapterByBook - book.bookKey,
+                        lastSyncMessage = "已删除本地书籍：${book.name}",
+                    )
+                }
+                refreshCacheStats(showLoading = false)
+            },
+            onErrorPrefix = "删除本地书籍失败",
+            showLoading = false,
+        )
+    }
+
+    fun openServerBook(book: BookItem) {
+        viewModelScope.launch {
+            runCatching { repository.ensureLocalShelfBook(book) }
+            refreshLocalBookshelf(showLoading = false)
+        }
+        openBook(book.bookKey, book.bookUrl, book.sourceUrl, book.name, preferredChapterNumber = 1)
+    }
+
+    fun openOfflineBook(item: OfflineCatalogItem) {
+        viewModelScope.launch {
+            runCatching {
+                repository.ensureLocalShelfBook(
+                    SearchResultItem(
+                        bookKey = item.bookKey,
+                        name = item.name,
+                        author = item.author,
+                        bookUrl = item.bookUrl,
+                        sourceUrl = item.sourceUrl,
+                        sourceName = "offline-catalog",
+                    )
+                )
+            }
+            refreshLocalBookshelf(showLoading = false)
+        }
+        openBook(item.bookKey, item.bookUrl, item.sourceUrl, item.name, preferredChapterNumber = 1)
+    }
+
+    fun openLocalBook(book: LocalShelfBook) {
+        _state.update { state ->
+            state.copy(
+                readingChapterByBook = state.readingChapterByBook + (
+                    book.bookKey to book.lastReadChapter.coerceAtLeast(1)
+                ),
+            )
+        }
+        openBook(
+            book.bookKey,
+            book.bookUrl,
+            book.sourceUrl,
+            book.name,
+            preferredChapterNumber = book.lastReadChapter.coerceAtLeast(1),
+        )
+    }
+
+    fun queueOfflineTaskForBook(book: BookItem) {
+        val snapshot = _state.value
+        if (snapshot.userId.isBlank() || snapshot.deviceId.isBlank()) {
+            _state.update { it.copy(errorMessage = "缺少用户 ID 或设备 ID") }
+            return
+        }
+        runRequest(
+            block = {
+                repository.createOfflineTask(
+                    OfflineTaskCreateRequest(
+                        userId = snapshot.userId,
+                        deviceId = snapshot.deviceId,
+                        bookId = book.id,
+                        bookKey = book.bookKey,
+                    )
+                )
+            },
+            onSuccess = { task ->
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        lastSyncMessage = "服务器缓存任务 ${task.status}：${task.bookName}",
+                    )
+                }
+                refreshOfflineCatalog(showLoading = false)
+            },
+            onErrorPrefix = "创建服务器缓存任务失败",
+        )
+    }
+
+    fun openChapter(chapterListIndex: Int) {
+        viewModelScope.launch {
+            loadChapterInternal(chapterListIndex, pushProgress = true)
+        }
+    }
+
+    fun nextChapter() {
+        val nextIndex = _state.value.activeChapterListIndex + 1
+        if (nextIndex <= _state.value.chapters.lastIndex) {
+            openChapter(nextIndex)
+        }
+    }
+
+    fun prevChapter() {
+        val prevIndex = _state.value.activeChapterListIndex - 1
+        if (prevIndex >= 0) {
+            openChapter(prevIndex)
+        }
+    }
+
+    fun cycleRefreshMode() {
+        val mode = refreshPolicy.cycleMode()
+        _state.update {
+            it.copy(
+                refreshMode = mode,
+                refreshEveryTurns = mode.fullRefreshInterval,
+                lastSyncMessage = "刷新模式：${mode.label}",
+            )
+        }
+        applyRefreshAction(RefreshAction.FULL)
+    }
+
+    fun toggleAutoPageTurn() {
+        val snapshot = _state.value
+        if (snapshot.activeBookKey.isNullOrBlank() || snapshot.chapters.isEmpty()) {
+            _state.update { it.copy(lastSyncMessage = "当前没有可自动翻页的阅读会话") }
+            return
+        }
+        if (snapshot.chapterType != "novel") {
+            _state.update { it.copy(lastSyncMessage = "漫画模式暂不支持自动翻页") }
+            return
+        }
+        _state.update {
+            val nextEnabled = !it.autoPageTurnEnabled
+            it.copy(
+                autoPageTurnEnabled = nextEnabled,
+                lastSyncMessage = if (nextEnabled) {
+                    "自动翻页已开启（${it.autoPageTurnSpeed.label}速）"
+                } else {
+                    "自动翻页已暂停"
+                },
+            )
+        }
+    }
+
+    fun setAutoPageTurnSpeed(speed: AutoPageTurnSpeed) {
+        prefs.edit().putString(AppConfig.KEY_READER_AUTO_TURN_SPEED, speed.name).apply()
+        _state.update {
+            it.copy(
+                autoPageTurnSpeed = speed,
+                lastSyncMessage = "自动翻页速度：${speed.label}速",
+            )
+        }
+    }
+
+    fun pauseAutoPageTurn(reason: String? = null) {
+        _state.update {
+            if (!it.autoPageTurnEnabled) {
+                it
+            } else {
+                it.copy(
+                    autoPageTurnEnabled = false,
+                    lastSyncMessage = reason ?: "自动翻页已暂停",
+                )
+            }
+        }
+    }
+
+    fun cycleReaderFontStyle() {
+        val options = _state.value.readerFonts.filter { !it.fromServer || it.downloaded }
+        if (options.isEmpty()) {
+            return
+        }
+        val currentKey = _state.value.readerFontKey
+        val currentIndex = options.indexOfFirst { it.key == currentKey }.let { if (it < 0) 0 else it }
+        val next = options[(currentIndex + 1) % options.size]
+        applyReaderFont(next.key)
+    }
+
+    fun increaseReaderFontSize() {
+        updateReaderFontSize(_state.value.readerFontSizeSp + 2)
+    }
+
+    fun decreaseReaderFontSize() {
+        updateReaderFontSize(_state.value.readerFontSizeSp - 2)
+    }
+
+    fun increaseReaderLineSpacing() {
+        updateReaderLineSpacing(_state.value.readerLineSpacing + 0.1f)
+    }
+
+    fun decreaseReaderLineSpacing() {
+        updateReaderLineSpacing(_state.value.readerLineSpacing - 0.1f)
+    }
+
+    fun syncCurrentProgress(force: Boolean = false) {
+        val snapshot = _state.value
+        if (!force && snapshot.syncMode == SyncMode.MANUAL_PROGRESS_ONLY) {
+            return
+        }
+        val payload = buildProgressPayload(snapshot) ?: return
+        if (!refreshNetworkAvailability()) {
+            enqueuePendingProgress(payload, if (force) "WiFi 未连接，进度已加入待补传" else "离线状态，进度已暂存")
+            return
+        }
+        if (!force) {
+            val now = System.currentTimeMillis()
+            if (now - lastProgressSyncAtMs < progressSyncCooldownMs) {
+                return
+            }
+            lastProgressSyncAtMs = now
+        }
+
+        viewModelScope.launch {
+            runCatching { repository.upsertSyncProgress(payload) }
+                .onSuccess { item ->
+                    applySyncedProgress(payload, item)
+                    flushPendingSyncQueue("当前进度同步成功，开始补传")
+                }
+                .onFailure {
+                    enqueuePendingProgress(payload, "同步失败，进度已加入待补传")
+                }
+        }
+    }
+
+    fun pullRemoteProgress() {
+        val snapshot = _state.value
+        if (snapshot.userId.isBlank()) {
+            return
+        }
+        flushPendingSyncQueue("拉取云端进度前补传")
+        runRequest(
+            block = { repository.pullSyncProgress(snapshot.userId, snapshot.syncCursor, limit = 100) },
+            onSuccess = { response ->
+                val remoteChapterMap = response.items.associate { item ->
+                    resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl) to (item.chapterIdx + 1).coerceAtLeast(1)
+                }
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        syncCursor = response.nextCursor,
+                        lastSyncRevision = response.nextCursor,
+                        readingChapterByBook = it.readingChapterByBook + remoteChapterMap,
+                        lastSyncMessage = "已拉取 ${response.items.size} 条云端进度",
+                    )
+                }
+
+                val activeBookKey = _state.value.activeBookKey
+                val match = response.items.lastOrNull {
+                    resolveBookKey(it.bookKey, it.sourceUrl, it.bookUrl) == activeBookKey
+                }
+                if (match != null && _state.value.chapters.isNotEmpty()) {
+                    val targetListIndex = _state.value.chapters.indexOfFirst { chapter ->
+                        chapter.idx == match.chapterIdx
+                    }.let { if (it < 0) 0 else it }
+                    viewModelScope.launch { loadChapterInternal(targetListIndex, pushProgress = false) }
+                }
+            },
+            onErrorPrefix = "拉取云端进度失败",
+        )
+    }
+
+    fun pullServerBookshelfNow() {
+        refreshServerBooks(showLoading = true)
+    }
+
+    fun manualSyncProgressNow() {
+        if (_state.value.activeBookKey.isNullOrBlank()) {
+            _state.update { it.copy(errorMessage = "当前没有可同步的阅读会话") }
+            return
+        }
+        syncCurrentProgress(force = true)
+    }
+
+    fun syncOnAppForeground() {
+        refreshLocalBookshelf(showLoading = false)
+        refreshCacheStats(showLoading = false)
+        wifiMonitor.refresh()
+        if (networkGate.canUseNetwork()) {
+            flushPendingSyncQueue("应用回前台，尝试补传进度")
+            scheduleWifiFullSync("应用回到前台")
+        }
+    }
+
+    fun syncOnAppBackground() {
+        syncCurrentProgress(force = false)
+    }
+
+    fun clearClientCache() {
+        runRequest(
+            block = {
+                repository.clearLocalCache()
+                repository.getClientCacheStats()
+            },
+            onSuccess = { latestClientStats ->
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        localBookshelf = emptyList(),
+                        activeBookName = "",
+                        activeBookKey = null,
+                        activeBookUrl = null,
+                        activeSourceUrl = null,
+                        chapters = emptyList(),
+                        activeChapterListIndex = 0,
+                        activeChapterTitle = "",
+                        chapterType = "novel",
+                        chapterImages = emptyList(),
+                        chapterText = "",
+                        readingChapterByBook = emptyMap(),
+                        localCacheStatusMessage = "本地缓存已清理",
+                        lastSyncMessage = "本地缓存已清理",
+                        clientCacheStats = latestClientStats,
+                        clientCacheMessage = "本地缓存已清理（章节 ${latestClientStats.chapterEntries} 条）",
+                    )
+                }
+                clearPendingSyncQueue("本地缓存已清理，待补传队列已清空")
+            },
+            onErrorPrefix = "清理本地缓存失败",
+        )
+    }
+
+    fun clearError() {
+        _state.update { it.copy(errorMessage = null) }
+    }
+
+    private fun observeWifiConnectivity() {
+        viewModelScope.launch {
+            wifiMonitor.isWifiOnline.collect { online ->
+                _state.update {
+                    it.copy(
+                        isNetworkAvailable = online,
+                        networkMode = networkModeFor(online),
+                    )
+                }
+                if (online) {
+                    flushPendingSyncQueue("WiFi 恢复，开始补传待同步进度")
+                    scheduleWifiFullSync("WiFi 已连接")
+                } else {
+                    wifiFullSyncJob?.cancel()
+                    offlineDownloadManager.cancel()
+                    repository.cancelNetworkRequests()
+                    _state.update {
+                        it.copy(
+                            offlineDownloadActive = false,
+                            isLoading = false,
+                            lastSyncMessage = "WiFi 已关闭，已停止所有联网任务",
+                            localCacheStatusMessage = if (it.offlineDownloadActive) "WiFi 已关闭，离线缓存已暂停" else it.localCacheStatusMessage,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun scheduleWifiFullSync(reason: String) {
+        wifiFullSyncJob?.cancel()
+        wifiFullSyncJob = viewModelScope.launch {
+            delay(5_000L)
+            if (!networkGate.canUseNetwork()) {
+                _state.update { it.copy(lastSyncMessage = "WiFi 已断开，跳过全量同步") }
+                return@launch
+            }
+            runFullSync(reason)
+        }
+    }
+
+    private fun runFullSync(reason: String) {
+        runRequest(
+            block = { performFullSync(reason) },
+            onSuccess = { result ->
+                _state.update { state ->
+                    val selected = if (state.selectedCategory == "all") {
+                        "all"
+                    } else if (result.categories.any { it.name == state.selectedCategory }) {
+                        state.selectedCategory
+                    } else {
+                        "all"
+                    }
+                    state.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        serverBooks = result.books,
+                        bookCategories = result.categories,
+                        offlineCatalog = result.catalog,
+                        readerFonts = result.readerFonts,
+                        readingChapterByBook = state.readingChapterByBook + result.remoteChapterMap,
+                        syncCursor = result.nextCursor,
+                        lastSyncRevision = maxOf(state.lastSyncRevision, result.progressRevision, result.nextCursor),
+                        serverCacheStats = result.serverCacheStats,
+                        clientCacheStats = result.clientCacheStats,
+                        selectedCategory = selected,
+                        pendingSyncCount = pendingSyncQueue.size,
+                        lastSyncMessage = "${result.reason}：全量同步完成",
+                    )
+                }
+                flushPendingSyncQueue("全量同步完成后补传待同步进度")
+            },
+            onErrorPrefix = "全量同步失败",
+            showLoading = false,
+        )
+    }
+
+    private suspend fun performFullSync(reason: String): FullSyncResult {
+        networkGate.requireWifiOnline("全量同步")
+        val snapshot = _state.value
+        val progressRevision = buildProgressPayload(snapshot)?.let { payload ->
+            runCatching { repository.upsertSyncProgress(payload).revision }.getOrDefault(0)
+        } ?: 0
+        val pulled = if (snapshot.userId.isNotBlank()) {
+            repository.pullSyncProgress(snapshot.userId, since = 0, limit = 200)
+        } else {
+            null
+        }
+        val serverFonts = repository.getServerFonts()
+        val localPaths = repository.listDownloadedFontFiles()
+        return FullSyncResult(
+            reason = reason,
+            books = repository.getBooks(),
+            categories = repository.getBookCategories().filter { !it.hidden },
+            catalog = if (snapshot.userId.isNotBlank() && snapshot.deviceId.isNotBlank()) {
+                repository.getOfflineCatalog(snapshot.userId, snapshot.deviceId)
+            } else {
+                emptyList()
+            },
+            readerFonts = buildReaderFontOptions(serverFonts, localPaths),
+            remoteChapterMap = pulled?.items.orEmpty().associate { item ->
+                resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl) to (item.chapterIdx + 1).coerceAtLeast(1)
+            },
+            nextCursor = pulled?.nextCursor ?: snapshot.syncCursor,
+            progressRevision = progressRevision,
+            serverCacheStats = repository.getServerCacheStats(),
+            clientCacheStats = repository.getClientCacheStats(),
+        )
+    }
+
+    private fun openBook(
+        bookKey: String,
+        bookUrl: String,
+        sourceUrl: String,
+        bookName: String,
+        preferredChapterNumber: Int,
+    ) {
+        runRequest(
+            block = { repository.getLocalChapterIndex(bookKey).sortedBy { it.idx } },
+            onSuccess = { chapters ->
+                if (chapters.isEmpty()) {
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = "本书尚未缓存章节，请开启 WiFi 后先缓存到本地",
+                            activeBookName = bookName,
+                            activeBookKey = bookKey,
+                            activeBookUrl = bookUrl,
+                            activeSourceUrl = sourceUrl,
+                            chapters = emptyList(),
+                            activeChapterListIndex = 0,
+                            activeChapterTitle = "",
+                            chapterText = "本书尚未缓存到本地，WiFi 关闭时不会自动联网拉取内容。",
+                            autoPageTurnEnabled = false,
+                        )
+                    }
+                    return@runRequest
+                }
+
+                val preferredIndex = (preferredChapterNumber - 1).coerceIn(0, chapters.lastIndex)
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = null,
+                        activeBookName = bookName,
+                        activeBookKey = bookKey,
+                        activeBookUrl = bookUrl,
+                        activeSourceUrl = sourceUrl,
+                        chapters = chapters,
+                        activeChapterListIndex = preferredIndex,
+                        autoPageTurnEnabled = false,
+                    )
+                }
+                viewModelScope.launch {
+                    currentActiveShelfBook()?.let { shelfBook ->
+                        runCatching { repository.seedLocalChapterIndex(shelfBook, chapters) }
+                    }
+                    loadChapterInternal(preferredIndex, pushProgress = false)
+                }
+            },
+            onErrorPrefix = "打开书籍失败",
+        )
+    }
+
+    private suspend fun loadChapterInternal(chapterListIndex: Int, pushProgress: Boolean) {
+        val snapshot = _state.value
+        val activeBook = currentActiveShelfBook() ?: return
+        val chapter = snapshot.chapters.getOrNull(chapterListIndex) ?: return
+
+        _state.update {
+            it.copy(
+                isLoading = true,
+                errorMessage = null,
+                activeChapterListIndex = chapterListIndex,
+                activeChapterTitle = chapter.title,
+                chapterImages = emptyList(),
+                chapterText = "章节加载中...",
+                autoPageTurnEnabled = false,
+            )
+        }
+
+        runCatching {
+            repository.getCachedChapterContent(activeBook.bookKey, chapter.idx)
+        }.onSuccess { content ->
+            if (content == null) {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        chapterType = "novel",
+                        chapterImages = emptyList(),
+                        chapterText = "本章未缓存。WiFi 关闭时不会自动联网；请在书架中选择更新本地缓存。",
+                        localCacheStatusMessage = "${activeBook.name}: 第 ${chapter.idx + 1} 章未缓存",
+                    )
+                }
+                persistActiveBookReadingChapter()
+                refreshPolicy.resetChapter()
+                applyRefreshAction(RefreshAction.FULL)
+                return@onSuccess
+            }
+
+            if (content.type == "manga") {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        chapterType = "manga",
+                        chapterImages = content.images,
+                        chapterText = buildMangaPlaceholder(content.images),
+                    )
+                }
+            } else {
+                val cacheSummary = repository.getLocalCacheSummary(activeBook.bookKey)
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        chapterType = "novel",
+                        chapterImages = emptyList(),
+                        chapterText = content.content.ifBlank { "本章内容为空" },
+                        localCacheStatusMessage = "本地缓存 ${cacheSummary.cached}/${cacheSummary.total}",
+                    )
+                }
+            }
+
+            persistActiveBookReadingChapter()
+            refreshPolicy.resetChapter()
+            applyRefreshAction(RefreshAction.FULL)
+            refreshLocalBookshelf(showLoading = false)
+            if (pushProgress) {
+                syncCurrentProgress(force = false)
+            }
+        }.onFailure { error ->
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    errorMessage = "加载章节失败：${error.message ?: "未知错误"}",
+                )
+            }
+        }
+    }
+
+    private fun runOfflinePipeline(
+        prepareBook: suspend () -> LocalShelfBook,
+        createServerTask: suspend (LocalShelfBook) -> OfflineTaskItem,
+        operationLabel: String,
+    ) {
+        if (!refreshNetworkAvailability()) {
+            _state.update { it.copy(lastSyncMessage = "WiFi 未连接，已阻止 $operationLabel") }
+            return
+        }
+        _state.update {
+            it.copy(
+                offlineDownloadActive = true,
+                isLoading = true,
+                errorMessage = null,
+                localCacheStatusMessage = "$operationLabel 已开始",
+            )
+        }
+
+        offlineDownloadManager.start(
+            scope = viewModelScope,
+            prepareBook = prepareBook,
+            createServerTask = createServerTask,
+            onProgress = { book, cached, total, failed ->
+                _state.update {
+                    it.copy(localCacheStatusMessage = "${book.name}: 本地 $cached/$total，失败 $failed")
+                }
+            },
+            onComplete = { result -> handleOfflineDownloadComplete(result) },
+            onError = { error -> handleOfflineDownloadError(operationLabel, error) },
+        )
+    }
+
+    private suspend fun handleOfflineDownloadComplete(result: OfflineDownloadResult) {
+        _state.update {
+            it.copy(
+                offlineDownloadActive = false,
+                isLoading = false,
+                errorMessage = null,
+                localCacheStatusMessage = "${result.shelfBook.name}: 服务器 ${result.serverTask.status}，本地 ${result.localSummary.cached}/${result.localSummary.total}，失败 ${result.localSummary.failed}",
+                lastSyncMessage = "已完成本地缓存：${result.shelfBook.name}",
+            )
+        }
+        refreshServerBooks(showLoading = false)
+        refreshOfflineCatalog(showLoading = false)
+        refreshLocalBookshelf(showLoading = false)
+        refreshCacheStats(showLoading = false)
+    }
+
+    private suspend fun handleOfflineDownloadError(operationLabel: String, error: Throwable) {
+        val message = when (error) {
+            is CancellationException -> "$operationLabel 已取消，已完成章节保留"
+            is NetworkDisabledException -> "WiFi 已关闭，$operationLabel 已停止，已完成章节保留"
+            else -> "$operationLabel 失败：${error.message ?: "未知错误"}"
+        }
+        _state.update {
+            it.copy(
+                offlineDownloadActive = false,
+                isLoading = false,
+                errorMessage = if (error is CancellationException) null else message,
+                localCacheStatusMessage = message,
+            )
+        }
+        refreshLocalBookshelf(showLoading = false)
+        refreshCacheStats(showLoading = false)
+    }
+
+    private fun getUserAndDevice(): Pair<String, String>? {
+        val snapshot = _state.value
+        if (snapshot.userId.isBlank() || snapshot.deviceId.isBlank()) {
+            _state.update { it.copy(errorMessage = "缺少用户 ID 或设备 ID") }
+            return null
+        }
+        return snapshot.userId to snapshot.deviceId
+    }
+
+    private suspend fun currentActiveShelfBook(): LocalShelfBook? {
+        val snapshot = _state.value
+        val bookKey = snapshot.activeBookKey ?: return null
+        val bookUrl = snapshot.activeBookUrl.orEmpty()
+        val sourceUrl = snapshot.activeSourceUrl.orEmpty()
+
+        snapshot.localBookshelf.firstOrNull {
+            it.bookKey == bookKey
+        }?.let { return it }
+
+        val latestBooks = repository.getLocalBookshelf()
+        latestBooks.firstOrNull {
+            it.bookKey == bookKey
+        }?.let { refreshed ->
+            _state.update { it.copy(localBookshelf = latestBooks) }
+            return refreshed
+        }
+
+        return repository.ensureLocalShelfBook(
+            SearchResultItem(
+                bookKey = bookKey,
+                name = snapshot.activeBookName,
+                bookUrl = bookUrl,
+                sourceUrl = sourceUrl,
+            )
+        )
+    }
+
+    private fun persistActiveBookReadingChapter() {
+        val snapshot = _state.value
+        val bookKey = snapshot.activeBookKey ?: return
+        val chapterNumber = (snapshot.activeChapterListIndex + 1).coerceAtLeast(1)
+
+        _state.update {
+            it.copy(readingChapterByBook = it.readingChapterByBook + (bookKey to chapterNumber))
+        }
+
+        viewModelScope.launch {
+            runCatching { repository.updateLocalReadChapter(bookKey, chapterNumber) }
+        }
+    }
+
+    private fun buildProgressPayload(snapshot: EinkUiState): SyncProgressUpsertRequest? {
+        val bookKey = snapshot.activeBookKey ?: return null
+        val bookUrl = snapshot.activeBookUrl ?: return null
+        val sourceUrl = snapshot.activeSourceUrl ?: return null
+        if (snapshot.userId.isBlank() || snapshot.deviceId.isBlank()) {
+            return null
+        }
+        val chapter = snapshot.chapters.getOrNull(snapshot.activeChapterListIndex) ?: return null
+        return SyncProgressUpsertRequest(
+            userId = snapshot.userId,
+            deviceId = snapshot.deviceId,
+            bookKey = bookKey,
+            bookUrl = bookUrl,
+            sourceUrl = sourceUrl,
+            bookName = snapshot.activeBookName,
+            chapterIdx = chapter.idx,
+            chapterTitle = chapter.title,
+            chapterUrl = chapter.url,
+            position = 0.0,
+        )
+    }
+
+    private fun applySyncedProgress(payload: SyncProgressUpsertRequest, item: SyncProgressItem) {
+        _state.update {
+            it.copy(
+                isLoading = false,
+                errorMessage = null,
+                syncCursor = maxOf(it.syncCursor, item.revision),
+                lastSyncRevision = item.revision,
+                readingChapterByBook = it.readingChapterByBook + (
+                    payload.bookKey to (payload.chapterIdx + 1).coerceAtLeast(1)
+                ),
+                lastSyncMessage = "阅读进度已同步 rev=${item.revision}",
+            )
+        }
+    }
+
+    private fun refreshNetworkAvailability(): Boolean {
+        val available = networkGate.canUseNetwork()
+        _state.update {
+            it.copy(
+                isNetworkAvailable = available,
+                networkMode = networkModeFor(available),
+            )
+        }
+        return available
+    }
+
+    private fun networkModeFor(available: Boolean): NetworkMode {
+        return if (available) NetworkMode.WIFI_ONLINE else NetworkMode.OFFLINE
+    }
+
+    private fun resolveBookKey(rawBookKey: String?, sourceUrl: String, bookUrl: String): String {
+        return BookIdentity.resolveBookKey(rawBookKey, sourceUrl, bookUrl)
+    }
+
+    private fun enqueuePendingProgress(payload: SyncProgressUpsertRequest, message: String) {
+        pendingSyncQueue[payload.bookKey] = payload
+        savePendingSyncQueue()
+        _state.update {
+            it.copy(
+                pendingSyncCount = pendingSyncQueue.size,
+                lastSyncMessage = message,
+            )
+        }
+    }
+
+    private fun flushPendingSyncQueue(trigger: String) {
+        if (pendingSyncQueue.isEmpty()) {
+            return
+        }
+        if (!networkGate.canUseNetwork()) {
+            refreshNetworkAvailability()
+            return
+        }
+
+        val entries = pendingSyncQueue.values.toList()
+        viewModelScope.launch {
+            var successCount = 0
+            for (payload in entries) {
+                val synced = runCatching { repository.upsertSyncProgress(payload) }.getOrNull()
+                if (synced != null) {
+                    pendingSyncQueue.remove(payload.bookKey)
+                    applySyncedProgress(payload, synced)
+                    successCount += 1
+                }
+            }
+            savePendingSyncQueue()
+            _state.update {
+                it.copy(
+                    pendingSyncCount = pendingSyncQueue.size,
+                    lastSyncMessage = if (successCount > 0) {
+                        "$trigger：已补传 $successCount 本，剩余 ${pendingSyncQueue.size} 本"
+                    } else {
+                        "$trigger：补传未成功，剩余 ${pendingSyncQueue.size} 本"
+                    },
+                )
+            }
+        }
+    }
+
+    private fun clearPendingSyncQueue(message: String? = null) {
+        if (pendingSyncQueue.isEmpty()) {
+            return
+        }
+        pendingSyncQueue.clear()
+        savePendingSyncQueue()
+        _state.update {
+            it.copy(
+                pendingSyncCount = 0,
+                lastSyncMessage = message ?: it.lastSyncMessage,
+            )
+        }
+    }
+
+    private fun loadPendingSyncQueue(): LinkedHashMap<String, SyncProgressUpsertRequest> {
+        val restored = LinkedHashMap<String, SyncProgressUpsertRequest>()
+        val raw = prefs.getString(AppConfig.KEY_PENDING_PROGRESS_QUEUE, null).orEmpty()
+        if (raw.isBlank()) {
+            return restored
+        }
+
+        runCatching {
+            val array = JSONArray(raw)
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val rawBookKey = item.optString("book_key").trim()
+                val userId = item.optString("user_id").trim()
+                val deviceId = item.optString("device_id").trim()
+                val bookUrl = item.optString("book_url").trim()
+                val sourceUrl = item.optString("source_url").trim()
+                val bookKey = resolveBookKey(rawBookKey, sourceUrl, bookUrl)
+                val chapterUrl = item.optString("chapter_url").trim()
+                val chapterTitle = item.optString("chapter_title").trim()
+                val bookName = item.optString("book_name").trim()
+                val chapterIdx = item.optInt("chapter_idx", -1)
+                if (
+                    bookKey.isBlank() ||
+                    userId.isBlank() ||
+                    deviceId.isBlank() ||
+                    bookUrl.isBlank() ||
+                    sourceUrl.isBlank() ||
+                    chapterIdx < 0 ||
+                    chapterUrl.isBlank() ||
+                    chapterTitle.isBlank()
+                ) {
+                    continue
+                }
+                restored[bookKey] = SyncProgressUpsertRequest(
+                    userId = userId,
+                    deviceId = deviceId,
+                    bookKey = bookKey,
+                    bookUrl = bookUrl,
+                    sourceUrl = sourceUrl,
+                    bookName = bookName,
+                    chapterIdx = chapterIdx,
+                    chapterTitle = chapterTitle,
+                    chapterUrl = chapterUrl,
+                    position = item.optDouble("position", 0.0),
+                )
+            }
+        }
+
+        return restored
+    }
+
+    private fun savePendingSyncQueue() {
+        val array = JSONArray()
+        pendingSyncQueue.values.forEach { payload ->
+            array.put(
+                JSONObject()
+                    .put("user_id", payload.userId)
+                    .put("device_id", payload.deviceId)
+                    .put("book_key", payload.bookKey)
+                    .put("book_url", payload.bookUrl)
+                    .put("source_url", payload.sourceUrl)
+                    .put("book_name", payload.bookName)
+                    .put("chapter_idx", payload.chapterIdx)
+                    .put("chapter_title", payload.chapterTitle)
+                    .put("chapter_url", payload.chapterUrl)
+                    .put("position", payload.position)
+            )
+        }
+        prefs.edit().putString(AppConfig.KEY_PENDING_PROGRESS_QUEUE, array.toString()).apply()
+    }
+
+    private fun applyRefreshAction(action: RefreshAction) {
+        _state.update {
+            it.copy(
+                lastRefreshAction = action,
+                refreshSignal = it.refreshSignal + 1,
+            )
+        }
+    }
+
+    private fun updateReaderFontSize(targetSizeSp: Int) {
+        val normalizedSizeSp = targetSizeSp.coerceIn(18, 36)
+        if (normalizedSizeSp == _state.value.readerFontSizeSp) {
+            return
+        }
+        prefs.edit().putInt(AppConfig.KEY_READER_FONT_SIZE, normalizedSizeSp).apply()
+        _state.update {
+            it.copy(
+                readerFontSizeSp = normalizedSizeSp,
+                lastSyncMessage = "字号：${normalizedSizeSp}sp",
+            )
+        }
+        applyRefreshAction(RefreshAction.FULL)
+    }
+
+    private fun updateReaderLineSpacing(targetLineSpacing: Float) {
+        val normalizedSpacing = targetLineSpacing.coerceIn(1.3f, 2.4f)
+        if (kotlin.math.abs(normalizedSpacing - _state.value.readerLineSpacing) < 0.001f) {
+            return
+        }
+        prefs.edit().putFloat(AppConfig.KEY_READER_LINE_SPACING, normalizedSpacing).apply()
+        _state.update {
+            it.copy(
+                readerLineSpacing = normalizedSpacing,
+                lastSyncMessage = "行距：${"%.2f".format(normalizedSpacing)}",
+            )
+        }
+        applyRefreshAction(RefreshAction.FULL)
+    }
+
+    private fun buildReaderFontOptions(serverFonts: List<ServerFontItem>, localPaths: List<String>): List<ReaderFontOption> {
+        val localPathMap = localPaths.associateBy { path -> path.substringAfterLast('/').lowercase() }
+        val remoteOptions = serverFonts.map { font ->
+            val localPath = localPathMap[font.fileName.lowercase()]
+            ReaderFontOption(
+                key = "server:${font.id}",
+                name = font.name,
+                fromServer = true,
+                downloaded = localPath != null,
+                filePath = localPath,
+                serverMeta = font,
+            )
+        }
+
+        val remoteFileNames = serverFonts.map { it.fileName.lowercase() }.toSet()
+        val localOnlyOptions = localPaths
+            .filter { path -> path.substringAfterLast('/').lowercase() !in remoteFileNames }
+            .map { path ->
+                val filename = path.substringAfterLast('/')
+                ReaderFontOption(
+                    key = "local:$filename",
+                    name = filename.substringBeforeLast('.'),
+                    fromServer = false,
+                    downloaded = true,
+                    filePath = path,
+                )
+            }
+
+        return builtInFontOptions + remoteOptions + localOnlyOptions
+    }
+
+    private fun resolveReaderFontStyle(fontKey: String): ReaderFontStyle {
+        if (fontKey == "builtin:sans") {
+            return ReaderFontStyle.SANS
+        }
+        if (fontKey == "builtin:serif") {
+            return ReaderFontStyle.SERIF
+        }
+        val lowered = fontKey.lowercase()
+        return if (lowered.contains("sans") || lowered.contains("hei")) ReaderFontStyle.SANS else ReaderFontStyle.SERIF
+    }
+
+    private fun buildMangaPlaceholder(images: List<String>): String {
+        return buildString {
+            appendLine("漫画模式")
+            appendLine("当前版本在墨水屏使用图片地址占位显示")
+            appendLine("已检测图片 ${images.size} 张")
+            images.take(8).forEachIndexed { index, url -> appendLine("${index + 1}. $url") }
+        }
+    }
+
+    private fun <T> runRequest(
+        block: suspend () -> T,
+        onSuccess: (T) -> Unit,
+        onErrorPrefix: String,
+        showLoading: Boolean = true,
+    ) {
+        _state.update {
+            if (showLoading) {
+                it.copy(isLoading = true, errorMessage = null)
+            } else {
+                it.copy(errorMessage = null)
+            }
+        }
+        viewModelScope.launch {
+            runCatching { block() }
+                .onSuccess { data -> onSuccess(data) }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = formatError(onErrorPrefix, error),
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun formatError(prefix: String, error: Throwable): String {
+        return when (error) {
+            is NetworkDisabledException -> "WiFi 未连接，已阻止联网：${error.operation}"
+            is CancellationException -> "操作已取消"
+            else -> "$prefix：${error.message ?: "未知错误"}"
+        }
+    }
+
+    private data class FullSyncResult(
+        val reason: String,
+        val books: List<BookItem>,
+        val categories: List<BookCategoryItem>,
+        val catalog: List<OfflineCatalogItem>,
+        val readerFonts: List<ReaderFontOption>,
+        val remoteChapterMap: Map<String, Int>,
+        val nextCursor: Int,
+        val progressRevision: Int,
+        val serverCacheStats: ServerCacheStats,
+        val clientCacheStats: ClientCacheStats,
+    )
+
+    companion object {
+        fun factory(application: Application): ViewModelProvider.Factory {
+            return object : ViewModelProvider.Factory {
+                override fun <T : androidx.lifecycle.ViewModel> create(
+                    modelClass: Class<T>,
+                    extras: CreationExtras,
+                ): T {
+                    @Suppress("UNCHECKED_CAST")
+                    return EinkViewModel(application) as T
+                }
+            }
+        }
+    }
+}

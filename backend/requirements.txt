@@ -1,0 +1,15 @@
+fastapi>=0.104
+uvicorn[standard]>=0.24
+aiosqlite>=0.19
+httpx>=0.25
+beautifulsoup4>=4.12
+lxml>=4.9
+jsonpath-ng>=1.6
+quickjs>=1.19
+pydantic>=2.5
+pydantic-settings>=2.1
+charset-normalizer>=3.3
+curl_cffi>=0.7
+pycryptodome>=3.20
+ebooklib>=0.18
+python-multipart>=0.0.9
