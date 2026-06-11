@@ -124,6 +124,56 @@ export async function getChapterCacheStats(): Promise<{ chapters: number; books:
   return { chapters, books };
 }
 
+export async function getBookChapterCacheCountMap(bookUrls: string[]): Promise<Record<string, number>> {
+  const normalizedBookUrls = Array.from(new Set(bookUrls.map((url) => url.trim()).filter(Boolean)));
+  const counts: Record<string, number> = {};
+  for (const bookUrl of normalizedBookUrls) {
+    counts[bookUrl] = 0;
+  }
+
+  if (normalizedBookUrls.length === 0) {
+    return counts;
+  }
+
+  const trackedBooks = new Set(normalizedBookUrls);
+  const allKeys = await keys();
+  for (const key of allKeys) {
+    const keyText = String(key);
+    if (!keyText.startsWith(BOOK_CHAPTER_IDX_PREFIX)) {
+      continue;
+    }
+
+    const suffix = keyText.slice(BOOK_CHAPTER_IDX_PREFIX.length);
+    const splitAt = suffix.lastIndexOf(":");
+    if (splitAt <= 0) {
+      continue;
+    }
+
+    const bookUrl = suffix.slice(0, splitAt);
+    if (!trackedBooks.has(bookUrl)) {
+      continue;
+    }
+
+    counts[bookUrl] += 1;
+  }
+
+  const fallbackUrls = normalizedBookUrls.filter((bookUrl) => counts[bookUrl] === 0);
+  if (fallbackUrls.length > 0) {
+    const fallbackPairs = await Promise.all(
+      fallbackUrls.map(async (bookUrl) => {
+        const indexed = (await get<string[]>(indexKey(bookUrl))) || [];
+        return [bookUrl, indexed.length] as const;
+      })
+    );
+
+    for (const [bookUrl, count] of fallbackPairs) {
+      counts[bookUrl] = count;
+    }
+  }
+
+  return counts;
+}
+
 async function getCacheStorageStats(): Promise<{ buckets: number; entries: number }> {
   if (!("caches" in window)) {
     return { buckets: 0, entries: 0 };

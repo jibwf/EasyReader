@@ -184,9 +184,16 @@ async def list_books(
     category: str | None = Query(default=None),
 ):
     db = await get_db()
-    sql = """SELECT b.*
+    sql = """SELECT
+        b.*,
+        COALESCE(cache_stats.server_cached_chapters, 0) AS server_cached_chapters
     FROM books b
-    LEFT JOIN book_categories c ON c.name = b.category_name"""
+    LEFT JOIN book_categories c ON c.name = b.category_name
+    LEFT JOIN (
+        SELECT book_id, COUNT(1) AS server_cached_chapters
+        FROM chapter_cache
+        GROUP BY book_id
+    ) AS cache_stats ON cache_stats.book_id = b.id"""
     conditions = []
     params: list[str] = []
 
@@ -217,6 +224,7 @@ async def list_books(
             category_name=row["category_name"] or DEFAULT_BOOK_CATEGORY_NAME,
             last_chapter=row["last_chapter"] or "",
             total_chapters=row["total_chapters"],
+            server_cached_chapters=row["server_cached_chapters"] or 0,
             added_at=row["added_at"] or "",
             updated_at=row["updated_at"] or "",
         )

@@ -67,6 +67,12 @@ fun BookshelfPane(
             state.localBookshelf.filter { it.categoryName == state.selectedCategory }
         }
     }
+    val localByBookKey = remember(state.localBookshelf) {
+        state.localBookshelf.associateBy { it.bookKey }
+    }
+    val serverByBookKey = remember(state.serverBooks) {
+        state.serverBooks.associateBy { it.bookKey }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxWidth(),
@@ -151,6 +157,9 @@ fun BookshelfPane(
                 items = visibleLocalBooks,
                 key = { it.bookKey },
             ) { book ->
+                val serverBook = serverByBookKey[book.bookKey]
+                val sourceTotalChapters = serverBook?.totalChapters ?: book.totalChapters
+                val serverCachedChapters = serverBook?.serverCachedChapters ?: 0
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -171,6 +180,10 @@ fun BookshelfPane(
                         )
                         Text(
                             text = "分类 ${book.categoryName} · 阅读章 ${book.lastReadChapter}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "服务器缓存 ${serverCachedChapters}/${sourceTotalChapters.coerceAtLeast(0)} · 本地缓存 ${book.cachedChapters}/${book.totalChapters.coerceAtLeast(0)}",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -202,6 +215,8 @@ fun BookshelfPane(
                 key = { it.bookKey.ifBlank { "${it.id}-${it.bookUrl}" } },
             ) { book ->
                 val readingChapter = state.readingChapterByBook[book.bookKey] ?: 1
+                val localBook = localByBookKey[book.bookKey]
+                val localCachedChapters = localBook?.cachedChapters ?: 0
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -219,6 +234,10 @@ fun BookshelfPane(
                         )
                         Text(
                             text = "分类 ${book.categoryName} · 阅读章 ${readingChapter}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)} · 本地缓存 ${localCachedChapters} 章",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -280,11 +299,17 @@ fun BookshelfPane(
     }
 
     selectedLocalBook?.let { book ->
+        val serverBook = serverByBookKey[book.bookKey]
+        val sourceTotalChapters = serverBook?.totalChapters ?: book.totalChapters
+        val serverCachedChapters = serverBook?.serverCachedChapters ?: 0
         AlertDialog(
             onDismissRequest = { selectedLocalBook = null },
             title = { Text(book.name) },
             text = {
-                Text("分类 ${book.categoryName} · 阅读章 ${book.lastReadChapter}")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("分类 ${book.categoryName} · 阅读章 ${book.lastReadChapter}")
+                    Text("服务器缓存 ${serverCachedChapters}/${sourceTotalChapters.coerceAtLeast(0)} · 本地缓存 ${book.cachedChapters}/${book.totalChapters.coerceAtLeast(0)}")
+                }
             },
             dismissButton = {
                 TextButton(
@@ -321,12 +346,14 @@ fun BookshelfPane(
 
     selectedServerBook?.let { book ->
         val readingChapter = state.readingChapterByBook[book.bookKey] ?: 1
+        val localCachedChapters = localByBookKey[book.bookKey]?.cachedChapters ?: 0
         AlertDialog(
             onDismissRequest = { selectedServerBook = null },
             title = { Text(book.name) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("分类 ${book.categoryName} · 阅读章 ${readingChapter}")
+                    Text("服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)} · 本地缓存 ${localCachedChapters} 章")
                 }
             },
             dismissButton = {

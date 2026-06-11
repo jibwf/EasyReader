@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type MouseEvent } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, Chapter, ChapterContent, SyncProgressItem, SyncProgressPayload } from "@/api/client";
 import { normalizeReaderTheme, type NormalizedReaderTheme, useReaderStore } from "@/stores/readerStore";
@@ -68,7 +68,6 @@ export default function Read() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const scrollSaveRef = useRef<ReturnType<typeof setTimeout>>();
   const autoPageTurnTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const autoScrollDeadlineRef = useRef(0);
   const suppressProgressPersistUntilRef = useRef(0);
 
   const readCachedChapter = useCallback(async (targetUrl: string, targetIdx: number) => {
@@ -84,8 +83,8 @@ export default function Read() {
 
   // Load chapter list
   useEffect(() => {
-    if (!bookKey || !bookUrl || !sourceUrl) return;
-    api.getChapters(bookKey)
+    if (!bookUrl || !sourceUrl) return;
+    api.getChapters({ bookKey, bookUrl, sourceUrl })
       .then((list) => { saveChaptersCache(bookUrl, list); setChapters(list); })
       .catch(() => {
         const cached = loadChaptersCache<Chapter>(bookUrl);
@@ -256,9 +255,6 @@ export default function Read() {
     saveTimerRef.current = setTimeout(persistProgressNow, 1200);
 
     const handleScroll = () => {
-      if (autoPageTurnEnabled && Date.now() > autoScrollDeadlineRef.current) {
-        setAutoPageTurnEnabled(false);
-      }
       if (scrollSaveRef.current) clearTimeout(scrollSaveRef.current);
       scrollSaveRef.current = setTimeout(persistProgressNow, 2000);
     };
@@ -270,7 +266,6 @@ export default function Read() {
       window.removeEventListener("scroll", handleScroll);
     };
   }, [
-    autoPageTurnEnabled,
     bookUrl,
     sourceUrl,
     bookKey,
@@ -351,7 +346,6 @@ export default function Read() {
   }, [loading, loadedChapters, chapters, sourceUrl, bookUrl, prefetchChapters, readCachedChapter]);
 
   const goToChapter = useCallback((chapter: Chapter) => {
-    setAutoPageTurnEnabled(false);
     persistProgressNow();
     setParams({
       url: chapter.url,
@@ -379,7 +373,10 @@ export default function Read() {
     autoPageTurnTimerRef.current = setTimeout(() => {
       const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
       if (maxScroll <= 0) {
-        setAutoPageTurnEnabled(false);
+        const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
+        if (next) {
+          goToChapter(next);
+        }
         return;
       }
 
@@ -387,7 +384,6 @@ export default function Read() {
       const nearBottom = currentScroll >= maxScroll - 12;
       if (nearBottom) {
         const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
-        setAutoPageTurnEnabled(false);
         if (next) {
           goToChapter(next);
         }
@@ -395,7 +391,6 @@ export default function Read() {
       }
 
       const targetScroll = Math.min(currentScroll + window.innerHeight * 0.88, maxScroll);
-      autoScrollDeadlineRef.current = Date.now() + 900;
       window.scrollTo({ top: targetScroll, behavior: "smooth" });
     }, intervalMs);
 
@@ -416,10 +411,6 @@ export default function Read() {
     goToChapter,
   ]);
 
-  useEffect(() => {
-    setAutoPageTurnEnabled(false);
-  }, [chapterUrl, startIdx]);
-
   const toggleToolbar = useCallback(() => {
     if (showToc || showSettings) {
       setShowToc(false);
@@ -433,6 +424,74 @@ export default function Read() {
     const prev = chapters.find((ch) => ch.idx === currentViewIdx - 1);
     if (prev) goToChapter(prev);
   };
+
+  const turnPageByTap = useCallback((direction: "prev" | "next") => {
+    if (contentType !== "novel" || loading || showSettings || showToc) {
+      return;
+    }
+
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    const currentScroll = window.scrollY;
+    const step = window.innerHeight * 0.9;
+
+    if (direction === "next") {
+      if (maxScroll <= 0 || currentScroll >= maxScroll - 12) {
+        const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
+        if (next) {
+          goToChapter(next);
+        }
+        return;
+      }
+      const targetScroll = Math.min(currentScroll + step, maxScroll);
+      window.scrollTo({ top: targetScroll, behavior: "smooth" });
+      return;
+    }
+
+    if (currentScroll <= 12) {
+      const prev = chapters.find((ch) => ch.idx === currentViewIdx - 1);
+      if (prev) {
+        goToChapter(prev);
+      }
+      return;
+    }
+
+    const targetScroll = Math.max(0, currentScroll - step);
+    window.scrollTo({ top: targetScroll, behavior: "smooth" });
+  }, [chapters, contentType, currentViewIdx, goToChapter, loading, showSettings, showToc]);
+
+  const handleReaderTap = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (showSettings || showToc || progressConflict) {
+      return;
+    }
+
+    if (contentType !== "novel" || loading) {
+      toggleToolbar();
+      return;
+    }
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button,a,input,select,textarea,label,[role='button']")) {
+      return;
+    }
+
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    if (!viewportWidth) {
+      toggleToolbar();
+      return;
+    }
+
+    if (event.clientX <= viewportWidth * 0.32) {
+      turnPageByTap("prev");
+      return;
+    }
+
+    if (event.clientX >= viewportWidth * 0.68) {
+      turnPageByTap("next");
+      return;
+    }
+
+    toggleToolbar();
+  }, [contentType, loading, progressConflict, showSettings, showToc, toggleToolbar, turnPageByTap]);
 
   const toggleAutoPageTurn = useCallback(() => {
     if (contentType !== "novel" || loading) {
@@ -556,7 +615,7 @@ export default function Read() {
   return (
     <div
       className={`min-h-screen ${themeStyles[activeTheme]}`}
-      onClick={toggleToolbar}
+      onClick={handleReaderTap}
     >
       {/* Top toolbar */}
       {showToolbar && (
@@ -583,7 +642,6 @@ export default function Read() {
           )}
           <button
             onClick={() => {
-              setAutoPageTurnEnabled(false);
               setShowSettings(true);
             }}
             className="text-[13px] ml-2"
@@ -668,7 +726,6 @@ export default function Read() {
         </button>
         <button
           onClick={() => {
-            setAutoPageTurnEnabled(false);
             setShowToc(true);
             setShowToolbar(false);
           }}

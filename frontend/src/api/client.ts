@@ -35,6 +35,47 @@ export function buildSearchStreamUrl(keyword: string, mode: SearchMode = "fast",
   return `${BASE}/search?${params.toString()}`;
 }
 
+export interface BookIdentityQuery {
+  bookKey?: string;
+  bookUrl?: string;
+  sourceUrl?: string;
+}
+
+function buildBookIdentityQuery(identity: string | BookIdentityQuery): string {
+  const params = new URLSearchParams();
+  if (typeof identity === "string") {
+    const normalizedBookKey = identity.trim();
+    if (!normalizedBookKey) {
+      throw new Error("book_key is required");
+    }
+    params.set("book_key", normalizedBookKey);
+    return params.toString();
+  }
+
+  const normalizedBookKey = (identity.bookKey || "").trim();
+  const normalizedBookUrl = (identity.bookUrl || "").trim();
+  const normalizedSourceUrl = (identity.sourceUrl || "").trim();
+
+  if (normalizedBookKey) {
+    params.set("book_key", normalizedBookKey);
+  }
+
+  if (normalizedBookUrl && normalizedSourceUrl) {
+    params.set("book_url", normalizedBookUrl);
+    params.set("source_url", normalizedSourceUrl);
+  }
+
+  if (params.has("book_key") || (normalizedBookUrl && normalizedSourceUrl)) {
+    return params.toString();
+  }
+
+  if (normalizedBookUrl || normalizedSourceUrl) {
+    throw new Error("book_url and source_url are required together");
+  }
+
+  throw new Error("book_key or (book_url + source_url) is required");
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const controller = options?.signal ? null : new AbortController();
   const timeout = controller
@@ -108,6 +149,7 @@ export interface BookItem {
   source_url: string;
   category_name: string;
   total_chapters: number;
+  server_cached_chapters: number;
 }
 
 export interface BookCategoryItem {
@@ -227,11 +269,11 @@ export const api = {
   search: (keyword: string, mode: SearchMode = "fast") =>
     request<SearchResult[]>(`/search?keyword=${encodeURIComponent(keyword)}&mode=${mode}&stream=false`),
 
-  getBookInfo: (bookKey: string) =>
-    request<BookInfo>(`/content/book-info?book_key=${encodeURIComponent(bookKey)}`),
+  getBookInfo: (identity: string | BookIdentityQuery) =>
+    request<BookInfo>(`/content/book-info?${buildBookIdentityQuery(identity)}`),
 
-  getChapters: (bookKey: string) =>
-    request<Chapter[]>(`/content/chapters?book_key=${encodeURIComponent(bookKey)}`),
+  getChapters: (identity: string | BookIdentityQuery) =>
+    request<Chapter[]>(`/content/chapters?${buildBookIdentityQuery(identity)}`),
 
   getChapterContent: (url: string, sourceUrl: string) =>
     request<ChapterContent>(

@@ -12,10 +12,16 @@ router = APIRouter(prefix="/api/content", tags=["content"])
 
 @router.get("/book-info", response_model=BookSchema)
 async def book_info(
-    book_key: str = Query(...),
+    book_key: str | None = Query(default=None),
+    book_url: str | None = Query(default=None),
+    source_url: str | None = Query(default=None),
 ):
-    book_url, source_url = await _resolve_book_identity(book_key=book_key)
-    info = await get_book_info(book_url, source_url)
+    resolved_book_url, resolved_source_url = await _resolve_book_identity(
+        book_key=book_key,
+        book_url=book_url,
+        source_url=source_url,
+    )
+    info = await get_book_info(resolved_book_url, resolved_source_url)
     if not info:
         raise HTTPException(status_code=404, detail="Book not found")
     return info
@@ -23,10 +29,16 @@ async def book_info(
 
 @router.get("/chapters", response_model=list[ChapterSchema])
 async def chapters(
-    book_key: str = Query(...),
+    book_key: str | None = Query(default=None),
+    book_url: str | None = Query(default=None),
+    source_url: str | None = Query(default=None),
 ):
-    book_url, source_url = await _resolve_book_identity(book_key=book_key)
-    result = await get_chapters(book_url, source_url)
+    resolved_book_url, resolved_source_url = await _resolve_book_identity(
+        book_key=book_key,
+        book_url=book_url,
+        source_url=source_url,
+    )
+    result = await get_chapters(resolved_book_url, resolved_source_url)
     return result
 
 
@@ -80,14 +92,31 @@ def _extract_images(content: str) -> list[str]:
 
 async def _resolve_book_identity(
     *,
-    book_key: str,
+    book_key: str | None = None,
+    book_url: str | None = None,
+    source_url: str | None = None,
 ) -> tuple[str, str]:
-    db = await get_db()
-    cursor = await db.execute(
-        "SELECT book_url, source_url FROM books WHERE book_key = ?",
-        (book_key,),
-    )
-    row = await cursor.fetchone()
-    if not row:
+    normalized_book_key = (book_key or "").strip()
+    normalized_book_url = (book_url or "").strip()
+    normalized_source_url = (source_url or "").strip()
+
+    if normalized_book_key:
+        db = await get_db()
+        cursor = await db.execute(
+            "SELECT book_url, source_url FROM books WHERE book_key = ?",
+            (normalized_book_key,),
+        )
+        row = await cursor.fetchone()
+        if row:
+            return row["book_url"], row["source_url"]
+        if normalized_book_url and normalized_source_url:
+            return normalized_book_url, normalized_source_url
         raise HTTPException(status_code=404, detail="Book not found")
-    return row["book_url"], row["source_url"]
+
+    if normalized_book_url and normalized_source_url:
+        return normalized_book_url, normalized_source_url
+
+    if normalized_book_url or normalized_source_url:
+        raise HTTPException(status_code=400, detail="book_url and source_url are required together")
+
+    raise HTTPException(status_code=400, detail="book_key or (book_url + source_url) is required")

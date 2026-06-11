@@ -4,6 +4,7 @@ import { api, BatchResultItem, BookCategoryItem, BookItem, Chapter, OfflineTaskI
 import {
   cacheChaptersBulk,
   getCachedChapter,
+  getBookChapterCacheCountMap,
 } from "@/utils/chapter-cache";
 import { getClientIdentity } from "@/utils/client-identity";
 import { loadBooksCache, saveBooksCache, saveChaptersCache } from "@/utils/local-cache";
@@ -46,6 +47,7 @@ export default function Shelf() {
   const [exportFormat, setExportFormat] = useState<"txt" | "epub">("txt");
   const [cacheProgress, setCacheProgress] = useState<{ current: number; total: number; bookName: string } | null>(null);
   const [offlineProgress, setOfflineProgress] = useState<OfflineProgressState | null>(null);
+  const [browserCachedChapterMap, setBrowserCachedChapterMap] = useState<Record<string, number>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -118,6 +120,24 @@ export default function Shelf() {
   useEffect(() => {
     loadBooks().catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    getBookChapterCacheCountMap(books.map((book) => book.book_url))
+      .then((counts) => {
+        if (active) {
+          setBrowserCachedChapterMap(counts);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setBrowserCachedChapterMap({});
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [books]);
 
   const handleClick = async (book: BookItem) => {
     try {
@@ -523,6 +543,11 @@ export default function Shelf() {
         ? `${scope}浏览器缓存完成：成功 ${successCount}，失败 ${failed}`
         : `${scope}浏览器缓存完成：共 ${successCount} 本`
     );
+    getBookChapterCacheCountMap(targetBooks.map((book) => book.book_url))
+      .then((counts) => {
+        setBrowserCachedChapterMap((prev) => ({ ...prev, ...counts }));
+      })
+      .catch(() => {});
     setOfflineProgress(null);
     setBusy(false);
   };
@@ -817,7 +842,10 @@ export default function Shelf() {
                     >
                       <p className="text-[15px] font-medium text-[#1d1d1f] truncate">{book.name}</p>
                       <p className="text-[12px] text-[#86868b] mt-1">
-                        {book.author ? `${book.author} · ` : ""}{book.total_chapters} 章
+                        {book.author ? `${book.author} · ` : ""}总章节 {book.total_chapters} 章
+                      </p>
+                      <p className="text-[11px] text-[#86868b] mt-0.5">
+                        服务器缓存 {book.server_cached_chapters ?? 0}/{book.total_chapters} 章 · 本地缓存 {browserCachedChapterMap[book.book_url] ?? 0} 章
                       </p>
                     </button>
 

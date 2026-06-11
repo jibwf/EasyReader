@@ -171,7 +171,7 @@ export default function ReaderSettings({ onClose, autoPageTurnEnabled, onToggleA
             ))}
           </div>
           <p className={`mt-2 text-[11px] ${mutedTextClass}`}>
-            章节切换、手动滚动、打开目录或设置时会自动暂停。
+            自动翻页会持续运行，直到你手动点击“暂停”。
           </p>
         </div>
       </div>

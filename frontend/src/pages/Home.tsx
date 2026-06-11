@@ -78,7 +78,9 @@ export default function Home() {
   };
 
   const handleRankClick = (item: RankItem) => {
-    navigate(`/book?book_url=${encodeURIComponent(item.book_url)}&source_url=${encodeURIComponent(item.source_url)}&book_key=${encodeURIComponent(item.book_key)}`);
+    navigate(
+      `/book?book_url=${encodeURIComponent(item.book_url)}&source_url=${encodeURIComponent(item.source_url)}&book_key=${encodeURIComponent(item.book_key)}&name=${encodeURIComponent(item.name)}`
+    );
   };
 
   return (

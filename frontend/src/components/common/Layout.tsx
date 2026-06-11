@@ -6,6 +6,8 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 }
 
+type InstallPromptMode = "deferred" | "manual" | "ios";
+
 const tabs = [
   { to: "/", label: "首页", mobileLabel: "首页" },
   { to: "/manga", label: "漫画", mobileLabel: "漫画" },
@@ -16,6 +18,7 @@ const tabs = [
 export default function Layout() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installPromptMode, setInstallPromptMode] = useState<InstallPromptMode | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [version, setVersion] = useState("");
   const shellContainerClass = "w-full max-w-[1440px] mx-auto px-4 md:px-8 lg:px-10 xl:px-12";
@@ -38,22 +41,57 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
-    const isAndroid = /android/i.test(window.navigator.userAgent);
-    if (!isAndroid || isStandalone) return;
+    if (isStandalone) return;
 
     const dismissedAt = Number(localStorage.getItem("pwa_install_dismissed_at") || "0");
     const cooldownMs = 24 * 60 * 60 * 1000;
     if (dismissedAt && Date.now() - dismissedAt < cooldownMs) return;
 
+    const ua = window.navigator.userAgent;
+    const isAndroid = /android/i.test(ua);
+    const isIos = /iphone|ipad|ipod/i.test(ua);
+
+    if (isIos) {
+      setInstallEvent(null);
+      setInstallPromptMode("ios");
+      setShowInstallPrompt(true);
+      return;
+    }
+
+    if (!isAndroid) {
+      return;
+    }
+
+    let hasDeferredPrompt = false;
     const handler = (event: Event) => {
       event.preventDefault();
+      hasDeferredPrompt = true;
       setInstallEvent(event as BeforeInstallPromptEvent);
+      setInstallPromptMode("deferred");
       setShowInstallPrompt(true);
     };
+
+    const onInstalled = () => {
+      setInstallEvent(null);
+      setInstallPromptMode(null);
+      setShowInstallPrompt(false);
+    };
+
     window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener("appinstalled", onInstalled);
+
+    const fallbackTimer = window.setTimeout(() => {
+      if (!hasDeferredPrompt) {
+        setInstallEvent(null);
+        setInstallPromptMode("manual");
+        setShowInstallPrompt(true);
+      }
+    }, 1800);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handler);
+      window.removeEventListener("appinstalled", onInstalled);
+      window.clearTimeout(fallbackTimer);
     };
   }, [isStandalone]);
 
@@ -65,20 +103,40 @@ export default function Layout() {
   }, []);
 
   const handleInstall = async () => {
-    if (!installEvent) return;
-    await installEvent.prompt();
-    const result = await installEvent.userChoice;
-    setInstallEvent(null);
-    setShowInstallPrompt(false);
-    if (result.outcome === "dismissed") {
-      localStorage.setItem("pwa_install_dismissed_at", String(Date.now()));
+    if (installEvent && installPromptMode === "deferred") {
+      await installEvent.prompt();
+      const result = await installEvent.userChoice;
+      setInstallEvent(null);
+      setInstallPromptMode(null);
+      setShowInstallPrompt(false);
+      if (result.outcome === "dismissed") {
+        localStorage.setItem("pwa_install_dismissed_at", String(Date.now()));
+      }
+      return;
     }
+
+    localStorage.setItem("pwa_install_dismissed_at", String(Date.now()));
+    setInstallEvent(null);
+    setInstallPromptMode(null);
+    setShowInstallPrompt(false);
   };
 
   const dismissInstallPrompt = () => {
     localStorage.setItem("pwa_install_dismissed_at", String(Date.now()));
+    setInstallEvent(null);
+    setInstallPromptMode(null);
     setShowInstallPrompt(false);
   };
+
+  const installPromptText =
+    installPromptMode === "ios"
+      ? "在 Safari 中点击“分享”，再选择“添加到主屏幕”，即可安装 EasyReader。"
+      : installPromptMode === "manual"
+      ? "可在浏览器菜单中选择“添加到主屏幕”，安装后可获得更稳定的离线阅读体验。"
+      : "安装到手机主屏，获得更稳定的离线阅读体验。";
+
+  const installActionLabel = installPromptMode === "deferred" ? "立即安装" : "我知道了";
+  const installDismissLabel = installPromptMode === "deferred" ? "稍后" : "关闭";
 
   return (
     <div className="min-h-full bg-[#fafafa]">
@@ -90,21 +148,21 @@ export default function Layout() {
         </div>
       )}
 
-      {showInstallPrompt && !isOffline && (
+      {showInstallPrompt && !isOffline && installPromptMode && (
         <div className="z-50 bg-[#0a66c2] text-white border-b border-[#09569f]">
           <div className={`${shellContainerClass} py-2 flex items-center gap-3`}>
-            <p className="text-[12px] flex-1">安装到手机主屏，获得更稳定的离线阅读体验。</p>
+            <p className="text-[12px] flex-1">{installPromptText}</p>
             <button
               onClick={handleInstall}
               className="px-2.5 py-1 rounded-md bg-white text-[#0a66c2] text-[12px] font-semibold"
             >
-              立即安装
+              {installActionLabel}
             </button>
             <button
               onClick={dismissInstallPrompt}
               className="px-2 py-1 rounded-md bg-white/15 text-white text-[12px]"
             >
-              稍后
+              {installDismissLabel}
             </button>
           </div>
         </div>

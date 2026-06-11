@@ -13,6 +13,7 @@ data class BookItem(
     @Json(name = "source_url") val sourceUrl: String,
     @Json(name = "category_name") val categoryName: String = "网文",
     @Json(name = "total_chapters") val totalChapters: Int,
+    @Json(name = "server_cached_chapters") val serverCachedChapters: Int = 0,
 )
 
 data class BookCategoryItem(
