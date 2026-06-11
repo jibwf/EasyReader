@@ -72,7 +72,6 @@ data class ActiveLocalCacheState(
 )
 
 data class EinkUiState(
-    val lowRamMode: Boolean = false,
     val baseUrl: String = AppConfig.DEFAULT_BASE_URL,
     val userId: String = AppConfig.DEFAULT_USER_ID,
     val deviceId: String = "",
@@ -92,6 +91,8 @@ data class EinkUiState(
     val selectedCategory: String = "all",
     val readingChapterByBook: Map<String, Int> = emptyMap(),
     val readingPositionByBook: Map<String, Double> = emptyMap(),
+    val remoteReadingChapterByBook: Map<String, Int> = emptyMap(),
+    val remoteReadingPositionByBook: Map<String, Double> = emptyMap(),
     val serverCacheStats: ServerCacheStats = ServerCacheStats(books = 0, chapters = 0, bytes = 0),
     val serverCacheMessage: String = "",
     val clientCacheStats: ClientCacheStats = ClientCacheStats(chapterBooks = 0, chapterEntries = 0, fontFiles = 0, bytes = 0),
@@ -129,6 +130,7 @@ data class EinkUiState(
     val activeLocalCache: ActiveLocalCacheState? = null,
     val pendingSyncCount: Int = 0,
     val syncConflict: SyncConflictState? = null,
+    val syncConflictDialogVisible: Boolean = false,
     val syncCursor: Int = 0,
     val lastSyncRevision: Int = 0,
     val lastSyncMessage: String = "No sync yet",

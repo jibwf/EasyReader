@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,7 +44,7 @@ fun SearchPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -65,7 +63,7 @@ fun SearchPane(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
+                        EinkButton(
                             onClick = onSearchBooks,
                             enabled = state.isNetworkAvailable,
                             modifier = Modifier
@@ -106,7 +104,7 @@ fun SearchPane(
                 items = state.searchResults,
                 key = { it.bookKey.ifBlank { "${it.sourceUrl}|${it.bookUrl}" } },
             ) { result ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                EinkCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -124,7 +122,7 @@ fun SearchPane(
                             style = MaterialTheme.typography.bodyMedium,
                         )
 
-                        Button(
+                        EinkButton(
                             onClick = { onImportSearchResult(result) },
                             enabled = state.isNetworkAvailable,
                             modifier = Modifier

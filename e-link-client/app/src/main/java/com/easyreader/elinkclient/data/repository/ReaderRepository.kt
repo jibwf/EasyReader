@@ -4,7 +4,6 @@ import android.content.Context
 import com.easyreader.elinkclient.core.AppConfig
 import com.easyreader.elinkclient.core.BookIdentity
 import com.easyreader.elinkclient.data.local.LocalCacheStore
-import com.easyreader.elinkclient.core.DeviceProfile
 import com.easyreader.elinkclient.core.NetworkGate
 import com.easyreader.elinkclient.data.model.BookCreateRequest
 import com.easyreader.elinkclient.data.model.BookCategoryAssignRequest
@@ -438,7 +437,7 @@ class ReaderRepository(
         var cached = cachedIndexes.size
         var processed = cachedIndexes.size
         val missing = chapters.filterNot { cachedIndexes.contains(it.idx) }
-        val batchSize = if (DeviceProfile.isLowRamDevice(appContext)) 1 else 3
+        val batchSize = 20
 
         if (processed > 0) {
             onProgress(cached, chapters.size, failed)
@@ -532,7 +531,7 @@ class ReaderRepository(
             if (processed >= total) {
                 return true
             }
-            return processed % 8 == 0
+            return processed % 12 == 0
         }
 
         fun normalizeBaseUrl(raw: String): String {

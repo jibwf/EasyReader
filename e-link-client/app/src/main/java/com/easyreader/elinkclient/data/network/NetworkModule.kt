@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import com.easyreader.elinkclient.core.AppConfig
-import com.easyreader.elinkclient.core.DeviceProfile
 import com.easyreader.elinkclient.core.NetworkGate
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -19,16 +18,11 @@ import java.util.concurrent.TimeUnit
 
 object NetworkModule {
     fun createHttpClient(context: Context, networkGate: NetworkGate): OkHttpClient {
-        val isLowRamDevice = DeviceProfile.isLowRamDevice(context)
         val clientVersion = resolveClientVersion(context)
-        val cacheSizeBytes = if (isLowRamDevice) {
-            4L * 1024L * 1024L
-        } else {
-            10L * 1024L * 1024L
-        }
+        val cacheSizeBytes = 10L * 1024L * 1024L
         val dispatcher = Dispatcher().apply {
-            maxRequests = if (isLowRamDevice) 4 else 8
-            maxRequestsPerHost = if (isLowRamDevice) 2 else 4
+            maxRequests = 20
+            maxRequestsPerHost = 10
         }
 
         return OkHttpClient.Builder()
@@ -45,7 +39,7 @@ object NetworkModule {
             .dispatcher(dispatcher)
             .connectionPool(
                 ConnectionPool(
-                    if (isLowRamDevice) 2 else 4,
+                    4,
                     5,
                     TimeUnit.MINUTES,
                 )

@@ -14,12 +14,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.easyreader.elinkclient.core.EinkDeviceRefreshBridge
 import com.easyreader.elinkclient.core.RefreshAction
+import com.easyreader.elinkclient.ui.AutoPageTurnSpeed
 import com.easyreader.elinkclient.ui.EinkUiState
 import com.easyreader.elinkclient.ui.ReaderHardwareAction
 import com.easyreader.elinkclient.ui.ReaderFontStyle
@@ -55,6 +53,7 @@ fun ReaderPane(
     onUpdateChapterPosition: (Double) -> Unit,
     onPauseAutoTurn: (String?) -> Unit,
     onToggleAutoTurn: () -> Unit,
+    onSetAutoTurnSpeed: (AutoPageTurnSpeed) -> Unit,
     onCycleReaderFont: () -> Unit,
     onIncreaseFontSize: () -> Unit,
     onDecreaseFontSize: () -> Unit,
@@ -108,6 +107,11 @@ fun ReaderPane(
     }
 
     val chapterIndicator = "第 ${state.activeChapterListIndex + 1}/${state.chapters.size.coerceAtLeast(1)} 章"
+    val readingProgressLabel = if (state.chapterType == "novel") {
+        "$chapterIndicator · ${(state.activeChapterPosition * 100).roundToInt()}%"
+    } else {
+        chapterIndicator
+    }
     val fontLabel = state.readerFonts.firstOrNull { it.key == state.readerFontKey }?.name
         ?: if (state.readerFontStyle == ReaderFontStyle.SERIF) "衬线" else "无衬线"
     val customTypeface = remember(state.readerFontPath) {
@@ -194,6 +198,13 @@ fun ReaderPane(
         latestPositionCallback(calculateReadingPosition(scrollView, textView))
     }
 
+    fun openQuickMenuFromTouch() {
+        if (state.autoPageTurnEnabled) {
+            onPauseAutoTurn("打开菜单已暂停自动翻页")
+        }
+        showQuickMenu = true
+    }
+
     LaunchedEffect(
         state.autoPageTurnEnabled,
         state.autoPageTurnSpeed,
@@ -231,38 +242,10 @@ fun ReaderPane(
         Column(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(34.dp)
-                    .clickable(
-                        interactionSource = noRippleSource,
-                        indication = null,
-                        onClick = {
-                            if (state.autoPageTurnEnabled) {
-                                onPauseAutoTurn("打开菜单已暂停自动翻页")
-                            }
-                            showQuickMenu = true
-                        },
-                    ),
-            ) {
-                Text(
-                    text = state.activeBookName.ifBlank { "EasyReader" },
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.align(Alignment.CenterStart),
-                )
-                Text(
-                    text = chapterIndicator,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxSize(),
             ) {
                 if (!state.activeChapterCached) {
-                    Card(
+                    EinkCard(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(vertical = 8.dp),
@@ -288,7 +271,7 @@ fun ReaderPane(
                                 ) {
                                     Text("目录")
                                 }
-                                Button(
+                                EinkButton(
                                     onClick = {
                                         onPauseAutoTurn("请求缓存已暂停自动翻页")
                                         onRequestCacheCurrentBook()
@@ -355,53 +338,46 @@ fun ReaderPane(
                     )
 
                     Row(modifier = Modifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .weight(2f)
-                                .fillMaxHeight()
-                                .clickable(
-                                    interactionSource = noRippleSource,
-                                    indication = null,
-                                    onClick = { turnPage(forward = false) },
-                                ),
-                        )
-                        Box(
-                            modifier = Modifier
-                                .weight(3f)
-                                .fillMaxHeight()
-                                .clickable(
-                                    interactionSource = noRippleSource,
-                                    indication = null,
-                                    onClick = { turnPage(forward = true) },
-                                ),
-                        )
-                    }
-                }
-            }
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(2f)
+                                    .clickable(
+                                        interactionSource = noRippleSource,
+                                        indication = null,
+                                        onClick = { openQuickMenuFromTouch() },
+                                    ),
+                            )
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedButton(
-                    onClick = { turnPage(forward = false) },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("上一页")
-                }
-                Text(
-                    text = chapterIndicator,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(
-                    onClick = { turnPage(forward = true) },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("下一页")
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(3f),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(2f)
+                                        .fillMaxHeight()
+                                        .clickable(
+                                            interactionSource = noRippleSource,
+                                            indication = null,
+                                            onClick = { turnPage(forward = false) },
+                                        ),
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .weight(3f)
+                                        .fillMaxHeight()
+                                        .clickable(
+                                            interactionSource = noRippleSource,
+                                            indication = null,
+                                            onClick = { turnPage(forward = true) },
+                                        ),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -417,7 +393,7 @@ fun ReaderPane(
                     ),
             )
 
-            Card(
+            EinkCard(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
@@ -429,6 +405,15 @@ fun ReaderPane(
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    Text(
+                        text = state.activeBookName.ifBlank { "EasyReader" },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = readingProgressLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -444,24 +429,10 @@ fun ReaderPane(
                             Text("目录")
                         }
                         OutlinedButton(
-                            onClick = {
-                                onPauseAutoTurn("切换章节已暂停自动翻页")
-                                onPrevChapter()
-                                showQuickMenu = false
-                            },
+                            onClick = onExitReader,
                             modifier = Modifier.weight(1f),
                         ) {
-                            Text("上一章")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                onPauseAutoTurn("切换章节已暂停自动翻页")
-                                onNextChapter()
-                                showQuickMenu = false
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("下一章")
+                            Text("退出阅读")
                         }
                     }
 
@@ -481,23 +452,41 @@ fun ReaderPane(
                         OutlinedButton(
                             onClick = {
                                 onToggleAutoTurn()
-                                showQuickMenu = false
                             },
                             modifier = Modifier.weight(1f),
                         ) {
                             Text(
                                 if (state.autoPageTurnEnabled) {
-                                    "自动翻页: 暂停"
+                                    "自动翻页: 开"
                                 } else {
-                                    "自动翻页: ${state.autoPageTurnSpeed.label}速"
+                                    "自动翻页: 关"
                                 }
                             )
                         }
-                        OutlinedButton(
-                            onClick = onExitReader,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text("退出阅读")
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AutoPageTurnSpeed.entries.forEach { speed ->
+                            val selected = speed == state.autoPageTurnSpeed
+                            if (selected) {
+                                EinkButton(
+                                    onClick = { onSetAutoTurnSpeed(speed) },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("速度 ${speed.label}")
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { onSetAutoTurnSpeed(speed) },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("速度 ${speed.label}")
+                                }
+                            }
                         }
                     }
 
@@ -565,7 +554,7 @@ fun ReaderPane(
         }
 
         if (showToc) {
-            Card(
+            EinkCard(
                 modifier = Modifier
                     .fillMaxSize()
                     .align(Alignment.Center),
@@ -597,7 +586,7 @@ fun ReaderPane(
                         itemsIndexed(state.chapters, key = { _, chapter -> chapter.idx }) { index, chapter ->
                             val isActive = index == state.activeChapterListIndex
                             if (isActive) {
-                                Button(
+                                EinkButton(
                                     onClick = { showToc = false },
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {

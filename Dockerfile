@@ -1,22 +1,29 @@
 FROM node:20-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN npm ci --omit=optional
 COPY frontend/ .
 RUN npm run build
 
-FROM python:3.11-slim
-WORKDIR /app
+FROM python:3.11-slim AS python-wheels
+WORKDIR /tmp
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends gcc libc6-dev \
 	&& rm -rf /var/lib/apt/lists/*
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-	&& apt-get purge -y --auto-remove gcc libc6-dev \
-	&& rm -rf /var/lib/apt/lists/* /root/.cache
+COPY backend/requirements.txt ./requirements.txt
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+
+FROM python:3.11-slim AS runtime-base
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+	PYTHONUNBUFFERED=1 \
+	PIP_NO_CACHE_DIR=1
+COPY backend/requirements.txt ./requirements.txt
+COPY --from=python-wheels /wheels /wheels
+RUN pip install --no-index --find-links=/wheels -r requirements.txt \
+	&& rm -rf /wheels /root/.cache
 COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist ./static/
-COPY data/fonts/ ./builtin-fonts/
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 ARG GIT_SHA=unknown
@@ -26,3 +33,11 @@ VOLUME ["/app/data"]
 EXPOSE 8080
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# Smaller image target without bundled fonts.
+FROM runtime-base AS runtime-slim
+RUN mkdir -p /app/builtin-fonts
+
+# Default target keeps existing behavior (bundle builtin fonts).
+FROM runtime-base AS runtime
+COPY data/fonts/ ./builtin-fonts/

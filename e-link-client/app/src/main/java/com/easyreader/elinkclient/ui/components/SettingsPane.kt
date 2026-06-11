@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,7 +30,6 @@ fun SettingsPane(
     onManualSyncProgress: () -> Unit,
     onResolveSyncConflictUseRemote: () -> Unit,
     onForceSyncConflictLocal: () -> Unit,
-    onDismissSyncConflict: () -> Unit,
     onRefreshOfflineDiagnostics: () -> Unit,
     onPullRemoteProgress: () -> Unit,
     onPullServerBookshelf: () -> Unit,
@@ -69,7 +66,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -106,7 +103,7 @@ fun SettingsPane(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(
+                    EinkButton(
                         onClick = { onApplyConfig(editableBaseUrl, editableUserId) },
                         modifier = Modifier
                             .weight(1f)
@@ -128,7 +125,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -157,7 +154,7 @@ fun SettingsPane(
                         ) {
                             Text("刷新")
                         }
-                        Button(
+                        EinkButton(
                             onClick = onClearServerCache,
                             enabled = state.isNetworkAvailable,
                             modifier = Modifier
@@ -179,7 +176,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -208,7 +205,7 @@ fun SettingsPane(
                         ) {
                             Text("刷新")
                         }
-                        Button(
+                        EinkButton(
                             onClick = onClearClientCache,
                             modifier = Modifier
                                 .weight(1f)
@@ -229,7 +226,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -247,7 +244,7 @@ fun SettingsPane(
                         OutlinedButton(
                             onClick = onRefreshOfflineDiagnostics,
                             enabled = state.isNetworkAvailable,
-                            modifier = Modifier.height(34.dp),
+                            modifier = Modifier.height(50.dp),
                         ) {
                             Text("刷新")
                         }
@@ -281,7 +278,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -307,7 +304,7 @@ fun SettingsPane(
                 )
 
                 state.syncConflict?.let { conflict ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    EinkCard(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -340,19 +337,13 @@ fun SettingsPane(
                                 ) {
                                     Text("采用云端")
                                 }
-                                Button(
+                                EinkButton(
                                     onClick = onForceSyncConflictLocal,
                                     enabled = state.isNetworkAvailable,
                                     modifier = Modifier.weight(1f),
                                 ) {
-                                    Text("强制覆盖")
+                                    Text("采用本地")
                                 }
-                            }
-                            OutlinedButton(
-                                onClick = onDismissSyncConflict,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text("稍后处理")
                             }
                         }
                     }
@@ -369,7 +360,7 @@ fun SettingsPane(
                     }
                 }
 
-                Button(
+                EinkButton(
                     onClick = onManualSyncProgress,
                     enabled = state.isNetworkAvailable,
                     modifier = Modifier
@@ -414,7 +405,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -432,7 +423,7 @@ fun SettingsPane(
                         OutlinedButton(
                             onClick = onRefreshFonts,
                             enabled = state.isNetworkAvailable,
-                            modifier = Modifier.height(34.dp),
+                            modifier = Modifier.height(50.dp),
                         ) {
                             Text("刷新")
                         }
@@ -445,7 +436,7 @@ fun SettingsPane(
                             state.readerFonts.forEach { font ->
                                 val isBuiltIn = font.key.startsWith("builtin:")
                                 val isLocalOnly = font.key.startsWith("local:")
-                                Card(modifier = Modifier.fillMaxWidth()) {
+                                EinkCard(modifier = Modifier.fillMaxWidth()) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -471,7 +462,7 @@ fun SettingsPane(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
                                             if (font.fromServer && !font.downloaded && font.serverMeta != null) {
-                                                Button(
+                                                EinkButton(
                                                     onClick = { onDownloadAndApplyFont(font.serverMeta) },
                                                     enabled = state.isNetworkAvailable,
                                                     modifier = Modifier.weight(1f),
@@ -505,7 +496,7 @@ fun SettingsPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

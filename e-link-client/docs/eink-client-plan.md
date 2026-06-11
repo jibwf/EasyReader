@@ -26,6 +26,7 @@
 - 联网行为显式受控：WiFi 不可用时不做隐式联网。
 - 状态收敛：同步和待补传状态按书收敛，不保存过时的中间轨迹。
 - 设备适配本地化：刷新模式、实体按键、热区、字体都由客户端本地决策。
+- 视觉规则墨水化：全局禁用阴影和高程，避免出现类 LCD 的浮层视觉噪声。
 - UI 静态优先：减少动画、减少高频重绘、减少长链路前台阻塞。
 
 ## 当前已落地的收口点
@@ -90,7 +91,7 @@
 - `data/network/NetworkModule.kt` 和 `EasyReaderApi.kt` 负责 HTTP、契约头和 API 映射。
 - `core/NetworkGate.kt` 和 `core/WifiConnectivityMonitor.kt` 负责 WiFi 闸门与网络状态。
 - `core/EinkRefreshPolicy.kt`、`core/EinkDeviceRefreshBridge.kt` 负责刷新模式与设备桥接。
-- `core/DeviceIdProvider.kt`、`core/DeviceProfile.kt` 负责设备标识和设备档案能力。
+- `core/DeviceIdProvider.kt` 负责设备标识。
 
 这一层统一处理“什么时候能联网、如何联网、如何适配设备”。
 
@@ -158,6 +159,7 @@
 - 同步冲突必须显式处理，不能默认吞掉。
 - 服务端离线任务状态与设备本地落盘状态不能混成一个字段。
 - UI 与设备能力适配要优先考虑低 RAM、弱 CPU 和墨水屏刷新成本。
+- 墨水屏终端 UI 必须禁用阴影与高程：Card/Surface/Dialog/Button 使用 0 elevation，避免任何阴影视觉。
 
 ## 非目标
 

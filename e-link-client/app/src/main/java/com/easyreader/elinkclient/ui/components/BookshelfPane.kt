@@ -13,8 +13,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -65,9 +63,6 @@ fun BookshelfPane(
             state.localBookshelf.filter { it.categoryName == state.selectedCategory }
         }
     }
-    val localByBookKey = remember(state.localBookshelf) {
-        state.localBookshelf.associateBy { it.bookKey }
-    }
     val serverByBookKey = remember(state.serverBooks) {
         state.serverBooks.associateBy { it.bookKey }
     }
@@ -84,7 +79,7 @@ fun BookshelfPane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -103,7 +98,7 @@ fun BookshelfPane(
                         items(categoryItems, key = { it }) { name ->
                             OutlinedButton(
                                 onClick = { onSelectCategory(name) },
-                                modifier = Modifier.height(34.dp),
+                                modifier = Modifier.height(50.dp),
                             ) {
                                 Text(if (name == "all") "全部分类" else name)
                             }
@@ -114,7 +109,7 @@ fun BookshelfPane(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
+                        EinkButton(
                             onClick = onRefreshLocalShelf,
                             modifier = Modifier
                                 .weight(1f)
@@ -158,7 +153,8 @@ fun BookshelfPane(
                 val serverBook = serverByBookKey[book.bookKey]
                 val sourceTotalChapters = serverBook?.totalChapters ?: book.totalChapters
                 val serverCachedChapters = serverBook?.serverCachedChapters ?: 0
-                Card(
+                val localProgressText = "本地进度 第 ${book.lastReadChapter.coerceAtLeast(1)} 章 · ${formatProgressPercent(book.lastReadPosition)}"
+                EinkCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .combinedClickable(
@@ -177,7 +173,7 @@ fun BookshelfPane(
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            text = "分类 ${book.categoryName} · 阅读章 ${book.lastReadChapter}",
+                            text = "分类 ${book.categoryName} · $localProgressText",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
@@ -212,10 +208,14 @@ fun BookshelfPane(
                 items = visibleServerBooks,
                 key = { serverShelfItemKey(it) },
             ) { book ->
-                val readingChapter = state.readingChapterByBook[book.bookKey] ?: 1
-                val localBook = localByBookKey[book.bookKey]
-                val localCachedChapters = localBook?.cachedChapters ?: 0
-                Card(
+                val remoteChapter = state.remoteReadingChapterByBook[book.bookKey]
+                val remotePosition = state.remoteReadingPositionByBook[book.bookKey] ?: 0.0
+                val remoteProgressText = if (remoteChapter != null) {
+                    "云端进度 第 ${remoteChapter.coerceAtLeast(1)} 章 · ${formatProgressPercent(remotePosition)}"
+                } else {
+                    "云端进度 暂无"
+                }
+                EinkCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { selectedServerBook = book },
@@ -231,11 +231,11 @@ fun BookshelfPane(
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            text = "分类 ${book.categoryName} · 阅读章 ${readingChapter}",
+                            text = "分类 ${book.categoryName} · $remoteProgressText",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            text = "服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)} · 本地缓存 ${localCachedChapters} 章",
+                            text = "服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)}",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -248,12 +248,14 @@ fun BookshelfPane(
         val serverBook = serverByBookKey[book.bookKey]
         val sourceTotalChapters = serverBook?.totalChapters ?: book.totalChapters
         val serverCachedChapters = serverBook?.serverCachedChapters ?: 0
+        val localProgressText = "本地进度 第 ${book.lastReadChapter.coerceAtLeast(1)} 章 · ${formatProgressPercent(book.lastReadPosition)}"
         AlertDialog(
             onDismissRequest = { selectedLocalBook = null },
+            tonalElevation = 0.dp,
             title = { Text(book.name) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("分类 ${book.categoryName} · 阅读章 ${book.lastReadChapter}")
+                    Text("分类 ${book.categoryName} · $localProgressText")
                     Text("服务器缓存 ${serverCachedChapters}/${sourceTotalChapters.coerceAtLeast(0)} · 本地缓存 ${book.cachedChapters}/${book.totalChapters.coerceAtLeast(0)}")
                 }
             },
@@ -291,15 +293,21 @@ fun BookshelfPane(
     }
 
     selectedServerBook?.let { book ->
-        val readingChapter = state.readingChapterByBook[book.bookKey] ?: 1
-        val localCachedChapters = localByBookKey[book.bookKey]?.cachedChapters ?: 0
+        val remoteChapter = state.remoteReadingChapterByBook[book.bookKey]
+        val remotePosition = state.remoteReadingPositionByBook[book.bookKey] ?: 0.0
+        val remoteProgressText = if (remoteChapter != null) {
+            "云端进度 第 ${remoteChapter.coerceAtLeast(1)} 章 · ${formatProgressPercent(remotePosition)}"
+        } else {
+            "云端进度 暂无"
+        }
         AlertDialog(
             onDismissRequest = { selectedServerBook = null },
+            tonalElevation = 0.dp,
             title = { Text(book.name) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("分类 ${book.categoryName} · 阅读章 ${readingChapter}")
-                    Text("服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)} · 本地缓存 ${localCachedChapters} 章")
+                    Text("分类 ${book.categoryName} · $remoteProgressText")
+                    Text("服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)}")
                 }
             },
             dismissButton = {
@@ -357,4 +365,9 @@ internal fun serverShelfItemKey(book: BookItem): String {
 private fun buildSectionKey(prefix: String, stablePart: String, fallback: String): String {
     val resolved = stablePart.ifBlank { fallback }
     return "$prefix:$resolved"
+}
+
+private fun formatProgressPercent(position: Double): String {
+    val normalized = position.coerceIn(0.0, 1.0)
+    return "${(normalized * 100).toInt()}%"
 }

@@ -8,12 +8,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,12 +24,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.easyreader.elinkclient.ui.components.BookshelfPane
+import com.easyreader.elinkclient.ui.components.EinkCard
 import com.easyreader.elinkclient.ui.components.HomePane
 import com.easyreader.elinkclient.ui.components.ReaderPane
 import com.easyreader.elinkclient.ui.components.SearchPane
@@ -90,6 +93,8 @@ fun MainScreen(viewModel: EinkViewModel) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
                 ) {
                     Column(
                         modifier = Modifier
@@ -121,6 +126,8 @@ fun MainScreen(viewModel: EinkViewModel) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
                 ) {
                     Row(
                         modifier = Modifier
@@ -170,6 +177,7 @@ fun MainScreen(viewModel: EinkViewModel) {
                     onUpdateChapterPosition = viewModel::updateActiveChapterPosition,
                     onPauseAutoTurn = viewModel::pauseAutoPageTurn,
                     onToggleAutoTurn = viewModel::toggleAutoPageTurn,
+                    onSetAutoTurnSpeed = viewModel::setAutoPageTurnSpeed,
                     onCycleReaderFont = viewModel::cycleReaderFontStyle,
                     onIncreaseFontSize = viewModel::increaseReaderFontSize,
                     onDecreaseFontSize = viewModel::decreaseReaderFontSize,
@@ -182,6 +190,43 @@ fun MainScreen(viewModel: EinkViewModel) {
                         showReader = false
                     },
                 )
+
+                if (state.syncConflictDialogVisible) {
+                    state.syncConflict?.let { conflict ->
+                    AlertDialog(
+                        onDismissRequest = {},
+                        tonalElevation = 0.dp,
+                        properties = DialogProperties(
+                            dismissOnBackPress = false,
+                            dismissOnClickOutside = false,
+                        ),
+                        title = { Text("同步冲突待处理") },
+                        text = {
+                            Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                                Text(conflict.summary, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    text = "本地 -> 第 ${conflict.local.chapterIdx + 1} 章 · 位置 ${"%.2f".format(conflict.local.position)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = "云端 -> 第 ${conflict.remote.chapterIdx + 1} 章 · 位置 ${"%.2f".format(conflict.remote.position)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = viewModel::resolveSyncConflictUseRemote) {
+                                    Text("采用云端")
+                                }
+                                TextButton(onClick = viewModel::forceSyncConflictLocal) {
+                                    Text("采用本地")
+                                }
+                            }
+                        },
+                    )
+                    }
+                }
             }
         } else {
             Column(
@@ -191,7 +236,7 @@ fun MainScreen(viewModel: EinkViewModel) {
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 state.errorMessage?.let { errorText ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    EinkCard(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = errorText,
                             color = MaterialTheme.colorScheme.error,
@@ -276,7 +321,6 @@ fun MainScreen(viewModel: EinkViewModel) {
                             onManualSyncProgress = viewModel::manualSyncProgressNow,
                             onResolveSyncConflictUseRemote = viewModel::resolveSyncConflictUseRemote,
                             onForceSyncConflictLocal = viewModel::forceSyncConflictLocal,
-                            onDismissSyncConflict = viewModel::dismissSyncConflict,
                             onRefreshOfflineDiagnostics = viewModel::refreshOfflineCatalog,
                             onPullRemoteProgress = viewModel::pullRemoteProgress,
                             onPullServerBookshelf = viewModel::pullServerBookshelfNow,

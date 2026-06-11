@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -41,7 +39,7 @@ fun HomePane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -77,7 +75,7 @@ fun HomePane(
                             },
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        Button(onClick = onContinueReading) {
+                        EinkButton(onClick = onContinueReading) {
                             Text("继续阅读")
                         }
                     }
@@ -86,7 +84,7 @@ fun HomePane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -118,7 +116,7 @@ fun HomePane(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -134,7 +132,7 @@ fun HomePane(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Button(
+                        EinkButton(
                             onClick = onRefreshLocalShelf,
                             modifier = Modifier.weight(1f),
                         ) {
@@ -166,7 +164,7 @@ fun HomePane(
 
         if (state.localCacheStatusMessage.isNotBlank() || state.lastSyncMessage.isNotBlank()) {
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                EinkCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()

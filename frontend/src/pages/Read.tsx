@@ -17,6 +17,7 @@ const AUTO_PAGE_TURN_INTERVAL_MS = {
 } as const;
 
 const CONFLICT_RESOLVE_SYNC_SUPPRESS_MS = 5000;
+const PROGRESS_CONFLICT_THRESHOLD = 0.3;
 
 interface LoadedChapter {
   title: string;
@@ -27,12 +28,50 @@ interface LoadedChapter {
 interface ProgressConflictPrompt {
   server: SyncProgressItem;
   local: SyncProgressPayload;
+  gap: number;
 }
+
+type SyncConflictDecision =
+  | { type: "manual"; gap: number }
+  | { type: "local"; gap: number }
+  | { type: "remote"; gap: number };
 
 function formatProgressLabel(position: number): string {
   const percentValue = position <= 1 ? position * 100 : position;
   const normalized = Math.max(0, Math.min(100, percentValue));
   return `${Math.round(normalized)}%`;
+}
+
+function normalizeProgressScalar(chapterIdx: number, position: number): number {
+  const safeChapter = Number.isFinite(chapterIdx) ? Math.max(0, chapterIdx) : 0;
+  const safePositionRaw = Number.isFinite(position) ? position : 0;
+  const safePosition = Math.max(0, Math.min(1, safePositionRaw));
+  const chapterProgress = safeChapter + safePosition;
+  return chapterProgress / (chapterProgress + 1);
+}
+
+function calculateProgressGap(local: SyncProgressPayload, server: SyncProgressItem): number {
+  const localScalar = normalizeProgressScalar(local.chapter_idx, local.position);
+  const serverScalar = normalizeProgressScalar(server.chapter_idx, server.position);
+  return Math.abs(localScalar - serverScalar);
+}
+
+function isLocalProgressAhead(local: SyncProgressPayload, server: SyncProgressItem): boolean {
+  if (local.chapter_idx !== server.chapter_idx) {
+    return local.chapter_idx > server.chapter_idx;
+  }
+  return local.position >= server.position;
+}
+
+function evaluateConflictDecision(local: SyncProgressPayload, server: SyncProgressItem): SyncConflictDecision {
+  const gap = calculateProgressGap(local, server);
+  if (gap > PROGRESS_CONFLICT_THRESHOLD) {
+    return { type: "manual", gap };
+  }
+  if (isLocalProgressAhead(local, server)) {
+    return { type: "local", gap };
+  }
+  return { type: "remote", gap };
 }
 
 export default function Read() {
@@ -216,28 +255,101 @@ export default function Read() {
     };
   }, [bookUrl, sourceUrl, bookKey, chapters, currentViewIdx, progressConflict, bookName, title]);
 
+  const applyServerProgress = useCallback((server: SyncProgressItem) => {
+    suppressProgressPersistUntilRef.current = Date.now() + CONFLICT_RESOLVE_SYNC_SUPPRESS_MS;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (scrollSaveRef.current) clearTimeout(scrollSaveRef.current);
+    setCurrentViewIdx(server.chapter_idx);
+    const nextParams: Record<string, string> = {
+      url: server.chapter_url,
+      source_url: server.source_url,
+      title: server.chapter_title,
+      idx: String(server.chapter_idx),
+      book_key: server.book_key,
+      book_url: server.book_url,
+      book_name: server.book_name,
+      scroll: String(server.position || 0),
+    };
+    setProgressConflict(null);
+    setShowToolbar(false);
+    setShowSettings(false);
+    setShowToc(false);
+    setParams(nextParams, { replace: true });
+  }, [setParams]);
+
+  const replayQueuedProgress = useCallback(() => {
+    if (getSyncProgressQueueSize() <= 0) {
+      return;
+    }
+    flushSyncProgressQueue(async (queued) => {
+      const replayResult = await api.upsertSyncProgress(queued);
+      if (!replayResult.accepted && replayResult.conflict) {
+        const decision = evaluateConflictDecision(queued, replayResult);
+        if (decision.type === "manual") {
+          if (
+            queued.book_key === bookKey
+            && Date.now() >= suppressProgressPersistUntilRef.current
+          ) {
+            setProgressConflict({ server: replayResult, local: queued, gap: decision.gap });
+          }
+          throw new Error("sync conflict");
+        }
+
+        if (decision.type === "local") {
+          await api.upsertSyncProgress({ ...queued, force: true });
+          return replayResult;
+        }
+
+        if (queued.book_key === bookKey) {
+          applyServerProgress(replayResult);
+        }
+      }
+      return replayResult;
+    }).catch(() => {});
+  }, [applyServerProgress, bookKey]);
+
+  const pushLocalProgressWithForce = useCallback((payload: SyncProgressPayload, clearPrompt: boolean) => {
+    const forcePayload: SyncProgressPayload = {
+      ...payload,
+      force: true,
+    };
+    api.upsertSyncProgress(forcePayload).then(() => {
+      if (clearPrompt) {
+        setProgressConflict(null);
+      }
+      replayQueuedProgress();
+    }).catch(() => {
+      enqueueSyncProgress(forcePayload);
+      if (clearPrompt) {
+        setProgressConflict(null);
+      }
+    });
+  }, [replayQueuedProgress]);
+
   const syncProgressPayload = useCallback((payload: SyncProgressPayload) => {
     api.upsertSyncProgress(payload).then((res) => {
       if (!res.accepted && res.conflict) {
         if (Date.now() < suppressProgressPersistUntilRef.current) {
           return;
         }
-        setProgressConflict({ server: res, local: payload });
+        const decision = evaluateConflictDecision(payload, res);
+        if (decision.type === "manual") {
+          setProgressConflict({ server: res, local: payload, gap: decision.gap });
+          return;
+        }
+        if (decision.type === "local") {
+          pushLocalProgressWithForce(payload, false);
+          return;
+        }
+        applyServerProgress(res);
+        replayQueuedProgress();
         return;
       }
-      if (getSyncProgressQueueSize() > 0) {
-        flushSyncProgressQueue(async (queued) => {
-          const replayResult = await api.upsertSyncProgress(queued);
-          if (!replayResult.accepted && replayResult.conflict) {
-            throw new Error("sync conflict");
-          }
-          return replayResult;
-        }).catch(() => {});
-      }
+      replayQueuedProgress();
     }).catch(() => {
       enqueueSyncProgress(payload);
     });
-  }, []);
+  }, [applyServerProgress, pushLocalProgressWithForce, replayQueuedProgress]);
 
   const persistProgressNow = useCallback(() => {
     const payload = buildCurrentProgressPayload();
@@ -503,49 +615,12 @@ export default function Read() {
 
   const applyServerProgressFromConflict = () => {
     if (!progressConflict) return;
-    const server = progressConflict.server;
-    suppressProgressPersistUntilRef.current = Date.now() + CONFLICT_RESOLVE_SYNC_SUPPRESS_MS;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    if (scrollSaveRef.current) clearTimeout(scrollSaveRef.current);
-    setCurrentViewIdx(server.chapter_idx);
-    const nextParams: Record<string, string> = {
-      url: server.chapter_url,
-      source_url: server.source_url,
-      title: server.chapter_title,
-      idx: String(server.chapter_idx),
-      book_key: server.book_key,
-      book_url: server.book_url,
-      book_name: server.book_name,
-      scroll: String(server.position || 0),
-    };
-    setProgressConflict(null);
-    setShowToolbar(false);
-    setShowSettings(false);
-    setShowToc(false);
-    setParams(nextParams, { replace: true });
+    applyServerProgress(progressConflict.server);
   };
 
   const overwriteServerWithLocalProgress = () => {
     if (!progressConflict) return;
-    const forcePayload: SyncProgressPayload = {
-      ...progressConflict.local,
-      force: true,
-    };
-    api.upsertSyncProgress(forcePayload).then(() => {
-      setProgressConflict(null);
-      if (getSyncProgressQueueSize() > 0) {
-        flushSyncProgressQueue(async (queued) => {
-          const replayResult = await api.upsertSyncProgress(queued);
-          if (!replayResult.accepted && replayResult.conflict) {
-            throw new Error("sync conflict");
-          }
-          return replayResult;
-        }).catch(() => {});
-      }
-    }).catch(() => {
-      enqueueSyncProgress(forcePayload);
-      setProgressConflict(null);
-    });
+    pushLocalProgressWithForce(progressConflict.local, true);
   };
 
   const hasPrev = chapters.some((ch) => ch.idx === currentViewIdx - 1);
@@ -602,9 +677,6 @@ export default function Read() {
   const conflictInfoPanelClass = isNightTheme ? "mt-3 p-3 rounded-lg bg-white/[0.06]" : "mt-3 p-3 rounded-lg bg-black/[0.04]";
   const conflictInfoTitleClass = isNightTheme ? "text-[12px] text-[#e5e5e7] font-medium" : "text-[12px] text-[#1d1d1f] font-medium";
   const conflictInfoMetaClass = isNightTheme ? "text-[12px] text-[#9ea0a8] mt-1" : "text-[12px] text-[#86868b] mt-1";
-  const conflictLaterClass = isNightTheme
-    ? "mt-2 w-full px-3 py-2 rounded-lg bg-white/[0.06] text-[12px] text-[#9ea0a8]"
-    : "mt-2 w-full px-3 py-2 rounded-lg bg-black/[0.04] text-[12px] text-[#86868b]";
 
   const paddingMap = { sm: "px-4", md: "px-6", lg: "px-10" };
 
@@ -787,7 +859,7 @@ export default function Read() {
           <div className={conflictCardClass}>
             <h3 className={conflictTitleClass}>检测到跨设备进度冲突</h3>
             <p className={conflictBodyClass}>
-              {progressConflict.server.conflict_reason === "chapter_regression" ? "云端章节更靠后" : "云端阅读位置更靠后"}，请选择保留哪一端进度。
+              当前进度差 {Math.round(progressConflict.gap * 100)}%（超过 30%），必须立即选择保留云端或本机进度。
             </p>
             <div className={conflictInfoPanelClass}>
               <p className={conflictInfoTitleClass}>云端进度</p>
@@ -813,12 +885,6 @@ export default function Read() {
                 以本机进度覆盖
               </button>
             </div>
-            <button
-              onClick={() => setProgressConflict(null)}
-              className={conflictLaterClass}
-            >
-              稍后处理
-            </button>
           </div>
         </div>
       )}
