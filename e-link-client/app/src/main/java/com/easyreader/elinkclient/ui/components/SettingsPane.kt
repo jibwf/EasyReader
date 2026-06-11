@@ -22,7 +22,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.easyreader.elinkclient.data.model.ServerFontItem
-import com.easyreader.elinkclient.ui.AutoPageTurnSpeed
 import com.easyreader.elinkclient.ui.EinkUiState
 
 @Composable
@@ -31,11 +30,13 @@ fun SettingsPane(
     onApplyConfig: (String, String) -> Unit,
     onCycleSyncMode: () -> Unit,
     onManualSyncProgress: () -> Unit,
+    onResolveSyncConflictUseRemote: () -> Unit,
+    onForceSyncConflictLocal: () -> Unit,
+    onDismissSyncConflict: () -> Unit,
+    onRefreshOfflineDiagnostics: () -> Unit,
     onPullRemoteProgress: () -> Unit,
     onPullServerBookshelf: () -> Unit,
     onCycleRefreshMode: () -> Unit,
-    onToggleAutoPageTurn: () -> Unit,
-    onSetAutoPageTurnSpeed: (AutoPageTurnSpeed) -> Unit,
     onRefreshCacheStats: () -> Unit,
     onClearServerCache: () -> Unit,
     onApplyReaderFont: (String) -> Unit,
@@ -229,6 +230,58 @@ fun SettingsPane(
 
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "离线诊断",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        OutlinedButton(
+                            onClick = onRefreshOfflineDiagnostics,
+                            enabled = state.isNetworkAvailable,
+                            modifier = Modifier.height(34.dp),
+                        ) {
+                            Text("刷新")
+                        }
+                    }
+
+                    if (state.offlineCatalog.isEmpty()) {
+                        Text(
+                            text = "暂无服务器离线目录诊断数据，需要时手动刷新。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        Text(
+                            text = "服务器离线目录 ${state.offlineCatalog.size} 项",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        state.offlineCatalog.take(5).forEach { item ->
+                            Text(
+                                text = "${item.name} · ${item.cachedChapters}/${item.totalChapters}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        if (state.offlineCatalog.size > 5) {
+                            Text(
+                                text = "其余 ${state.offlineCatalog.size - 5} 项已省略",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -252,6 +305,58 @@ fun SettingsPane(
                     text = "网络状态: ${state.networkMode.label}",
                     style = MaterialTheme.typography.bodySmall,
                 )
+
+                state.syncConflict?.let { conflict ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "同步冲突待处理",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = conflict.summary,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = "本地 -> 第 ${conflict.local.chapterIdx + 1} 章 · 位置 ${"%.2f".format(conflict.local.position)}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = "云端 -> 第 ${conflict.remote.chapterIdx + 1} 章 · 位置 ${"%.2f".format(conflict.remote.position)}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedButton(
+                                    onClick = onResolveSyncConflictUseRemote,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("采用云端")
+                                }
+                                Button(
+                                    onClick = onForceSyncConflictLocal,
+                                    enabled = state.isNetworkAvailable,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("强制覆盖")
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onDismissSyncConflict,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("稍后处理")
+                            }
+                        }
+                    }
+                }
 
                 if (state.offlineDownloadActive) {
                     OutlinedButton(
@@ -298,37 +403,6 @@ fun SettingsPane(
                         .height(40.dp),
                 ) {
                     Text("刷新模式: ${state.refreshMode.label}（点击切换）")
-                }
-
-                OutlinedButton(
-                    onClick = onToggleAutoPageTurn,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp),
-                ) {
-                    Text(
-                        if (state.autoPageTurnEnabled) {
-                            "自动翻页: 已开启（点击暂停）"
-                        } else {
-                            "自动翻页: 已暂停（点击开始）"
-                        }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    AutoPageTurnSpeed.entries.forEach { speed ->
-                        OutlinedButton(
-                            onClick = { onSetAutoPageTurnSpeed(speed) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                        ) {
-                            Text(if (state.autoPageTurnSpeed == speed) "${speed.label}速*" else "${speed.label}速")
-                        }
-                    }
                 }
 
                 Text(
@@ -454,9 +528,27 @@ fun SettingsPane(
                     text = "状态: ${state.lastSyncMessage}",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (state.offlineTaskStatusMessage.isNotBlank()) {
+                    Text(
+                        text = "任务: ${state.offlineTaskStatusMessage}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 if (state.localCacheStatusMessage.isNotBlank()) {
                     Text(
                         text = "缓存: ${state.localCacheStatusMessage}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                state.activeOfflineTask?.let { task ->
+                    Text(
+                        text = "当前服务器任务: ${task.bookName} · ${task.status} ${task.progress}%",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                state.activeLocalCache?.let { cache ->
+                    Text(
+                        text = "当前本地落盘: ${cache.bookName} · ${cache.cachedChapters}/${cache.totalChapters} · 失败 ${cache.failedChapters}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

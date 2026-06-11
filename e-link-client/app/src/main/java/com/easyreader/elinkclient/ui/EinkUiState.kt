@@ -9,9 +9,12 @@ import com.easyreader.elinkclient.data.model.ChapterItem
 import com.easyreader.elinkclient.data.model.ClientCacheStats
 import com.easyreader.elinkclient.data.model.LocalShelfBook
 import com.easyreader.elinkclient.data.model.OfflineCatalogItem
+import com.easyreader.elinkclient.data.model.OfflineTaskItem
 import com.easyreader.elinkclient.data.model.SearchResultItem
 import com.easyreader.elinkclient.data.model.ServerCacheStats
 import com.easyreader.elinkclient.data.model.ServerFontItem
+import com.easyreader.elinkclient.data.model.SyncProgressItem
+import com.easyreader.elinkclient.data.model.SyncProgressUpsertRequest
 
 enum class ReaderFontStyle {
     SANS,
@@ -30,6 +33,12 @@ enum class AutoPageTurnSpeed(val label: String, val intervalMs: Long) {
     }
 }
 
+enum class ReaderHardwareAction {
+    NONE,
+    PREVIOUS_PAGE,
+    NEXT_PAGE,
+}
+
 data class ReaderFontOption(
     val key: String,
     val name: String,
@@ -37,6 +46,29 @@ data class ReaderFontOption(
     val downloaded: Boolean,
     val filePath: String? = null,
     val serverMeta: ServerFontItem? = null,
+)
+
+data class SyncConflictState(
+    val local: SyncProgressUpsertRequest,
+    val remote: SyncProgressItem,
+    val summary: String,
+)
+
+data class ActiveOfflineTaskState(
+    val taskId: String,
+    val bookName: String,
+    val status: String,
+    val progress: Int,
+    val cachedChapters: Int,
+    val totalChapters: Int,
+    val errorMessage: String = "",
+)
+
+data class ActiveLocalCacheState(
+    val bookName: String,
+    val cachedChapters: Int,
+    val totalChapters: Int,
+    val failedChapters: Int,
 )
 
 data class EinkUiState(
@@ -52,16 +84,19 @@ data class EinkUiState(
     val errorMessage: String? = null,
     val serverBooks: List<BookItem> = emptyList(),
     val localBookshelf: List<LocalShelfBook> = emptyList(),
+    val offlineTasks: List<OfflineTaskItem> = emptyList(),
     val offlineCatalog: List<OfflineCatalogItem> = emptyList(),
     val searchKeyword: String = "",
     val searchResults: List<SearchResultItem> = emptyList(),
     val bookCategories: List<BookCategoryItem> = emptyList(),
     val selectedCategory: String = "all",
     val readingChapterByBook: Map<String, Int> = emptyMap(),
+    val readingPositionByBook: Map<String, Double> = emptyMap(),
     val serverCacheStats: ServerCacheStats = ServerCacheStats(books = 0, chapters = 0, bytes = 0),
     val serverCacheMessage: String = "",
     val clientCacheStats: ClientCacheStats = ClientCacheStats(chapterBooks = 0, chapterEntries = 0, fontFiles = 0, bytes = 0),
     val clientCacheMessage: String = "",
+    val offlineTaskStatusMessage: String = "",
     val localCacheStatusMessage: String = "",
     val activeBookName: String = "",
     val activeBookKey: String? = null,
@@ -69,7 +104,16 @@ data class EinkUiState(
     val activeSourceUrl: String? = null,
     val chapters: List<ChapterItem> = emptyList(),
     val activeChapterListIndex: Int = 0,
+    val activeChapterCached: Boolean = false,
     val activeChapterTitle: String = "",
+    val activeChapterPosition: Double = 0.0,
+    val activeChapterScrollPosition: Double = 0.0,
+    val chapterRenderChunkIndex: Int = 0,
+    val chapterRenderChunkCount: Int = 1,
+    val chapterRenderChunkStart: Int = 0,
+    val chapterRenderChunkEnd: Int = 0,
+    val chapterRenderTotalChars: Int = 0,
+    val chapterRestoreToken: Long = 0L,
     val chapterType: String = "novel",
     val chapterImages: List<String> = emptyList(),
     val chapterText: String = "",
@@ -81,12 +125,18 @@ data class EinkUiState(
     val readerLineSpacing: Float = 1.85f,
     val autoPageTurnEnabled: Boolean = false,
     val autoPageTurnSpeed: AutoPageTurnSpeed = AutoPageTurnSpeed.MEDIUM,
+    val activeOfflineTask: ActiveOfflineTaskState? = null,
+    val activeLocalCache: ActiveLocalCacheState? = null,
     val pendingSyncCount: Int = 0,
+    val syncConflict: SyncConflictState? = null,
     val syncCursor: Int = 0,
     val lastSyncRevision: Int = 0,
     val lastSyncMessage: String = "No sync yet",
     val refreshMode: EinkRefreshMode = EinkRefreshMode.BALANCED,
     val refreshEveryTurns: Int = EinkRefreshMode.BALANCED.fullRefreshInterval,
+    val readerVisible: Boolean = false,
+    val pendingReaderCommand: ReaderHardwareAction = ReaderHardwareAction.NONE,
+    val readerCommandSignal: Long = 0L,
     val lastRefreshAction: RefreshAction = RefreshAction.NONE,
     val refreshSignal: Long = 0L,
 )

@@ -29,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.easyreader.elinkclient.data.model.BookItem
 import com.easyreader.elinkclient.data.model.LocalShelfBook
-import com.easyreader.elinkclient.data.model.OfflineCatalogItem
 import com.easyreader.elinkclient.ui.EinkUiState
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -39,7 +38,6 @@ fun BookshelfPane(
     onSelectCategory: (String) -> Unit,
     onSyncServerData: () -> Unit,
     onRefreshLocalShelf: () -> Unit,
-    onOpenOfflineBook: (OfflineCatalogItem) -> Unit,
     onOpenLocalBook: (LocalShelfBook) -> Unit,
     onOfflineLocalBook: (LocalShelfBook) -> Unit,
     onDeleteLocalBook: (LocalShelfBook) -> Unit,
@@ -155,7 +153,7 @@ fun BookshelfPane(
         } else {
             items(
                 items = visibleLocalBooks,
-                key = { it.bookKey },
+                key = { localShelfItemKey(it) },
             ) { book ->
                 val serverBook = serverByBookKey[book.bookKey]
                 val sourceTotalChapters = serverBook?.totalChapters ?: book.totalChapters
@@ -212,7 +210,7 @@ fun BookshelfPane(
         } else {
             items(
                 items = visibleServerBooks,
-                key = { it.bookKey.ifBlank { "${it.id}-${it.bookUrl}" } },
+                key = { serverShelfItemKey(it) },
             ) { book ->
                 val readingChapter = state.readingChapterByBook[book.bookKey] ?: 1
                 val localBook = localByBookKey[book.bookKey]
@@ -240,58 +238,6 @@ fun BookshelfPane(
                             text = "服务器缓存 ${book.serverCachedChapters}/${book.totalChapters.coerceAtLeast(0)} · 本地缓存 ${localCachedChapters} 章",
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                    }
-                }
-            }
-        }
-
-        item {
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-        }
-
-        item {
-            Text(
-                text = "服务器离线目录 (${state.offlineCatalog.size})",
-                style = MaterialTheme.typography.titleMedium,
-            )
-        }
-
-        if (state.offlineCatalog.isEmpty()) {
-            item {
-                Text(
-                    text = "此设备暂无服务器离线任务结果。",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        } else {
-            items(
-                items = state.offlineCatalog,
-                key = { it.bookKey.ifBlank { "${it.bookUrl}|${it.sourceUrl}" } },
-            ) { item ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = item.name,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            text = "${item.author.ifBlank { "未知作者" }} · 服务器缓存 ${item.cachedChapters}/${item.totalChapters}",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-
-                        Button(
-                            onClick = { onOpenOfflineBook(item) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp),
-                        ) {
-                            Text("阅读")
-                        }
                     }
                 }
             }
@@ -390,4 +336,25 @@ fun BookshelfPane(
             },
         )
     }
+}
+
+internal fun localShelfItemKey(book: LocalShelfBook): String {
+    return buildSectionKey(
+        prefix = "local",
+        stablePart = book.bookKey,
+        fallback = "${book.bookUrl}|${book.sourceUrl}|${book.name}",
+    )
+}
+
+internal fun serverShelfItemKey(book: BookItem): String {
+    return buildSectionKey(
+        prefix = "server",
+        stablePart = book.bookKey,
+        fallback = "${book.id}|${book.bookUrl}|${book.sourceUrl}",
+    )
+}
+
+private fun buildSectionKey(prefix: String, stablePart: String, fallback: String): String {
+    val resolved = stablePart.ifBlank { fallback }
+    return "$prefix:$resolved"
 }

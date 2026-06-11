@@ -96,6 +96,7 @@ data class LocalShelfBook(
     @Json(name = "cached_chapters") val cachedChapters: Int = 0,
     @Json(name = "total_chapters") val totalChapters: Int = 0,
     @Json(name = "last_read_chapter") val lastReadChapter: Int = 1,
+    @Json(name = "last_read_position") val lastReadPosition: Double = 0.0,
     @Json(name = "last_cached_at") val lastCachedAt: Long = 0L,
     @Json(name = "added_at") val addedAt: Long = System.currentTimeMillis(),
 )
@@ -139,6 +140,7 @@ data class ChapterItem(
     val title: String,
     val url: String,
     val idx: Int,
+    @Json(name = "is_cached") val isCached: Boolean = false,
 )
 
 data class ChapterContent(
@@ -158,6 +160,7 @@ data class SyncProgressUpsertRequest(
     @Json(name = "chapter_title") val chapterTitle: String,
     @Json(name = "chapter_url") val chapterUrl: String,
     val position: Double,
+    val force: Boolean = false,
 )
 
 data class SyncProgressItem(
@@ -173,6 +176,9 @@ data class SyncProgressItem(
     val position: Double,
     val revision: Int,
     @Json(name = "updated_at") val updatedAt: String,
+    val accepted: Boolean = true,
+    val conflict: Boolean = false,
+    @Json(name = "conflict_reason") val conflictReason: String = "",
 )
 
 data class SyncPullResponse(

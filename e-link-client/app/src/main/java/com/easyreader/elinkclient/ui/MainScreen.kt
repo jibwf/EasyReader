@@ -34,11 +34,15 @@ import com.easyreader.elinkclient.ui.components.ReaderPane
 import com.easyreader.elinkclient.ui.components.SearchPane
 import com.easyreader.elinkclient.ui.components.SettingsPane
 
-private enum class ScreenTab(val label: String) {
+internal enum class ScreenTab(val label: String) {
     Home("首页"),
     Bookshelf("书架"),
     Search("搜索"),
     Settings("设置"),
+}
+
+internal fun resolveScreenTab(name: String): ScreenTab {
+    return ScreenTab.entries.firstOrNull { it.name == name } ?: ScreenTab.Home
 }
 
 @Composable
@@ -54,7 +58,11 @@ fun MainScreen(viewModel: EinkViewModel) {
         }
     }
 
-    val selectedTab = ScreenTab.valueOf(currentTabName)
+    LaunchedEffect(showReader) {
+        viewModel.setReaderVisible(showReader)
+    }
+
+    val selectedTab = resolveScreenTab(currentTabName)
 
     LaunchedEffect(selectedTab, showReader) {
         if (!showReader && (selectedTab == ScreenTab.Home || selectedTab == ScreenTab.Bookshelf)) {
@@ -159,6 +167,7 @@ fun MainScreen(viewModel: EinkViewModel) {
                     onOpenChapter = viewModel::openChapter,
                     onPrevChapter = viewModel::prevChapter,
                     onNextChapter = viewModel::nextChapter,
+                    onUpdateChapterPosition = viewModel::updateActiveChapterPosition,
                     onPauseAutoTurn = viewModel::pauseAutoPageTurn,
                     onToggleAutoTurn = viewModel::toggleAutoPageTurn,
                     onCycleReaderFont = viewModel::cycleReaderFontStyle,
@@ -166,7 +175,9 @@ fun MainScreen(viewModel: EinkViewModel) {
                     onDecreaseFontSize = viewModel::decreaseReaderFontSize,
                     onIncreaseLineSpacing = viewModel::increaseReaderLineSpacing,
                     onDecreaseLineSpacing = viewModel::decreaseReaderLineSpacing,
+                    onRequestCacheCurrentBook = viewModel::refreshActiveBookCache,
                     onExitReader = {
+                        viewModel.persistCurrentReadingProgress()
                         viewModel.pauseAutoPageTurn("退出阅读已暂停自动翻页")
                         showReader = false
                     },
@@ -215,12 +226,10 @@ fun MainScreen(viewModel: EinkViewModel) {
                                 currentTabName = ScreenTab.Bookshelf.name
                                 viewModel.refreshServerBooks(showLoading = false)
                                 viewModel.refreshBookCategories(showLoading = false)
-                                viewModel.refreshOfflineCatalog(showLoading = false)
                             },
                             onOpenSearch = { currentTabName = ScreenTab.Search.name },
                             onSyncServerData = {
                                 viewModel.refreshServerBooks()
-                                viewModel.refreshOfflineCatalog()
                             },
                             onRefreshLocalShelf = viewModel::refreshLocalBookshelf,
                         )
@@ -233,13 +242,8 @@ fun MainScreen(viewModel: EinkViewModel) {
                             onSyncServerData = {
                                 viewModel.refreshServerBooks()
                                 viewModel.refreshBookCategories()
-                                viewModel.refreshOfflineCatalog()
                             },
                             onRefreshLocalShelf = viewModel::refreshLocalBookshelf,
-                            onOpenOfflineBook = {
-                                showReader = true
-                                viewModel.openOfflineBook(it)
-                            },
                             onOpenLocalBook = {
                                 showReader = true
                                 viewModel.openLocalBook(it)
@@ -270,11 +274,13 @@ fun MainScreen(viewModel: EinkViewModel) {
                             onApplyConfig = viewModel::updateServerConfig,
                             onCycleSyncMode = viewModel::cycleSyncMode,
                             onManualSyncProgress = viewModel::manualSyncProgressNow,
+                            onResolveSyncConflictUseRemote = viewModel::resolveSyncConflictUseRemote,
+                            onForceSyncConflictLocal = viewModel::forceSyncConflictLocal,
+                            onDismissSyncConflict = viewModel::dismissSyncConflict,
+                            onRefreshOfflineDiagnostics = viewModel::refreshOfflineCatalog,
                             onPullRemoteProgress = viewModel::pullRemoteProgress,
                             onPullServerBookshelf = viewModel::pullServerBookshelfNow,
                             onCycleRefreshMode = viewModel::cycleRefreshMode,
-                            onToggleAutoPageTurn = viewModel::toggleAutoPageTurn,
-                            onSetAutoPageTurnSpeed = viewModel::setAutoPageTurnSpeed,
                             onRefreshCacheStats = viewModel::refreshCacheStats,
                             onClearServerCache = viewModel::clearServerCache,
                             onApplyReaderFont = viewModel::applyReaderFont,

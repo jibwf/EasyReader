@@ -2,6 +2,7 @@ package com.easyreader.elinkclient.ui
 
 import android.app.Application
 import android.content.Context
+import android.view.KeyEvent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
@@ -20,7 +21,6 @@ import com.easyreader.elinkclient.data.model.BookCategoryItem
 import com.easyreader.elinkclient.data.model.BookItem
 import com.easyreader.elinkclient.data.model.ClientCacheStats
 import com.easyreader.elinkclient.data.model.LocalShelfBook
-import com.easyreader.elinkclient.data.model.OfflineCatalogItem
 import com.easyreader.elinkclient.data.model.OfflineTaskCreateRequest
 import com.easyreader.elinkclient.data.model.OfflineTaskItem
 import com.easyreader.elinkclient.data.model.SearchResultItem
@@ -39,6 +39,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
+import kotlin.math.floor
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -69,9 +71,11 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private var wifiFullSyncJob: Job? = null
+    private var serverOfflineTaskMonitorJob: Job? = null
     private var lastProgressSyncAtMs = 0L
     private val progressSyncCooldownMs = 45_000L
     private val pendingSyncQueue = LinkedHashMap<String, SyncProgressUpsertRequest>()
+    private val chapterChunkSizeChars = if (lowRamMode) 18_000 else 36_000
 
     private val _state = MutableStateFlow(
         EinkUiState(
@@ -135,6 +139,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         wifiFullSyncJob?.cancel()
+        serverOfflineTaskMonitorJob?.cancel()
         offlineDownloadManager.cancel()
         repository.cancelNetworkRequests()
         wifiMonitor.stop()
@@ -152,6 +157,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             .apply()
 
         repository.updateBaseUrl(normalizedBaseUrl)
+        serverOfflineTaskMonitorJob?.cancel()
 
         _state.update {
             val networkAvailable = networkGate.canUseNetwork()
@@ -161,12 +167,17 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = null,
                 isNetworkAvailable = networkAvailable,
                 networkMode = networkModeFor(networkAvailable),
+                offlineTasks = emptyList(),
+                offlineCatalog = emptyList(),
+                activeOfflineTask = null,
+                offlineTaskStatusMessage = "",
                 lastSyncMessage = "配置已保存",
             )
         }
 
         if (previousUserId != normalizedUserId) {
             clearPendingSyncQueue("用户切换，待补传队列已清空")
+            clearSyncConflict("用户切换，已清除同步冲突")
         }
 
         refreshLocalBookshelf(showLoading = false)
@@ -453,18 +464,42 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         runRequest(
-            block = { repository.getOfflineCatalog(snapshot.userId, snapshot.deviceId) },
-            onSuccess = { catalog ->
-                _state.update {
-                    it.copy(
-                        isLoading = if (showLoading) false else it.isLoading,
+            block = {
+                val tasks = repository.getOfflineTasks(snapshot.userId, snapshot.deviceId)
+                val catalog = repository.getOfflineCatalog(snapshot.userId, snapshot.deviceId)
+                tasks to catalog
+            },
+            onSuccess = { (tasks, catalog) ->
+                _state.update { state ->
+                    val currentTaskId = state.activeOfflineTask?.taskId
+                    val matchedTask = currentTaskId?.let { taskId ->
+                        tasks.firstOrNull { task -> task.taskId == taskId }
+                    }
+                    val refreshedTask = matchedTask?.let { task ->
+                        ActiveOfflineTaskState(
+                            taskId = task.taskId,
+                            bookName = task.bookName,
+                            status = task.status,
+                            progress = task.progress,
+                            cachedChapters = task.cachedChapters,
+                            totalChapters = task.totalChapters,
+                            errorMessage = task.errorMessage,
+                        )
+                    }
+                    state.copy(
+                        isLoading = if (showLoading) false else state.isLoading,
                         errorMessage = null,
+                        offlineTasks = tasks,
                         offlineCatalog = catalog,
-                        lastSyncMessage = "服务器离线目录已刷新：${catalog.size} 项",
+                        activeOfflineTask = refreshedTask ?: state.activeOfflineTask,
+                        offlineTaskStatusMessage = refreshedTask?.let { task ->
+                            buildOfflineTaskStatusMessage(task.bookName, task.status, task.progress, task.cachedChapters, task.totalChapters)
+                        } ?: state.offlineTaskStatusMessage,
+                        lastSyncMessage = "服务器离线诊断已刷新：目录 ${catalog.size} 项",
                     )
                 }
             },
-            onErrorPrefix = "刷新服务器离线目录失败",
+            onErrorPrefix = "刷新服务器离线诊断失败",
             showLoading = showLoading,
         )
     }
@@ -482,12 +517,16 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 val localChapterMap = books.associate { book ->
                     resolveBookKey(book.bookKey, book.sourceUrl, book.bookUrl) to book.lastReadChapter.coerceAtLeast(1)
                 }
+                val localPositionMap = books.associate { book ->
+                    resolveBookKey(book.bookKey, book.sourceUrl, book.bookUrl) to normalizeReadingPosition(book.lastReadPosition)
+                }
                 _state.update {
                     it.copy(
                         isLoading = if (showLoading) false else it.isLoading,
                         errorMessage = null,
                         localBookshelf = books,
                         readingChapterByBook = it.readingChapterByBook + localChapterMap,
+                        readingPositionByBook = it.readingPositionByBook + localPositionMap,
                     )
                 }
             },
@@ -622,6 +661,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         errorMessage = null,
                         localBookshelf = shelf,
                         readingChapterByBook = state.readingChapterByBook - book.bookKey,
+                        readingPositionByBook = state.readingPositionByBook - book.bookKey,
                         lastSyncMessage = "已删除本地书籍：${book.name}",
                     )
                 }
@@ -633,30 +673,19 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openServerBook(book: BookItem) {
+        val existingLocal = _state.value.localBookshelf.firstOrNull { it.bookKey == book.bookKey }
         viewModelScope.launch {
             runCatching { repository.ensureLocalShelfBook(book) }
             refreshLocalBookshelf(showLoading = false)
         }
-        openBook(book.bookKey, book.bookUrl, book.sourceUrl, book.name, preferredChapterNumber = 1)
-    }
-
-    fun openOfflineBook(item: OfflineCatalogItem) {
-        viewModelScope.launch {
-            runCatching {
-                repository.ensureLocalShelfBook(
-                    SearchResultItem(
-                        bookKey = item.bookKey,
-                        name = item.name,
-                        author = item.author,
-                        bookUrl = item.bookUrl,
-                        sourceUrl = item.sourceUrl,
-                        sourceName = "offline-catalog",
-                    )
-                )
-            }
-            refreshLocalBookshelf(showLoading = false)
-        }
-        openBook(item.bookKey, item.bookUrl, item.sourceUrl, item.name, preferredChapterNumber = 1)
+        openBook(
+            book.bookKey,
+            book.bookUrl,
+            book.sourceUrl,
+            book.name,
+            preferredChapterNumber = existingLocal?.lastReadChapter?.coerceAtLeast(1) ?: 1,
+            preferredPosition = existingLocal?.lastReadPosition ?: 0.0,
+        )
     }
 
     fun openLocalBook(book: LocalShelfBook) {
@@ -664,6 +693,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             state.copy(
                 readingChapterByBook = state.readingChapterByBook + (
                     book.bookKey to book.lastReadChapter.coerceAtLeast(1)
+                ),
+                readingPositionByBook = state.readingPositionByBook + (
+                    book.bookKey to normalizeReadingPosition(book.lastReadPosition)
                 ),
             )
         }
@@ -673,6 +705,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             book.sourceUrl,
             book.name,
             preferredChapterNumber = book.lastReadChapter.coerceAtLeast(1),
+            preferredPosition = book.lastReadPosition,
         )
     }
 
@@ -698,10 +731,20 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         isLoading = false,
                         errorMessage = null,
+                        activeOfflineTask = ActiveOfflineTaskState(
+                            taskId = task.taskId,
+                            bookName = task.bookName,
+                            status = task.status,
+                            progress = task.progress,
+                            cachedChapters = task.cachedChapters,
+                            totalChapters = task.totalChapters,
+                            errorMessage = task.errorMessage,
+                        ),
+                        offlineTaskStatusMessage = "服务器缓存任务 ${task.status}：${task.bookName}",
                         lastSyncMessage = "服务器缓存任务 ${task.status}：${task.bookName}",
                     )
                 }
-                refreshOfflineCatalog(showLoading = false)
+                monitorActiveOfflineTask(task, book.name)
             },
             onErrorPrefix = "创建服务器缓存任务失败",
         )
@@ -709,7 +752,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openChapter(chapterListIndex: Int) {
         viewModelScope.launch {
-            loadChapterInternal(chapterListIndex, pushProgress = true)
+            loadChapterInternal(chapterListIndex, pushProgress = true, restorePosition = 0.0)
         }
     }
 
@@ -833,8 +876,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching { repository.upsertSyncProgress(payload) }
                 .onSuccess { item ->
-                    applySyncedProgress(payload, item)
-                    flushPendingSyncQueue("当前进度同步成功，开始补传")
+                    if (handleSyncUpsertResponse(payload, item, "当前进度同步")) {
+                        flushPendingSyncQueue("当前进度同步成功，开始补传")
+                    }
                 }
                 .onFailure {
                     enqueuePendingProgress(payload, "同步失败，进度已加入待补传")
@@ -854,6 +898,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 val remoteChapterMap = response.items.associate { item ->
                     resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl) to (item.chapterIdx + 1).coerceAtLeast(1)
                 }
+                val remotePositionMap = response.items.associate { item ->
+                    resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl) to normalizeReadingPosition(item.position)
+                }
                 _state.update {
                     it.copy(
                         isLoading = false,
@@ -861,6 +908,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         syncCursor = response.nextCursor,
                         lastSyncRevision = response.nextCursor,
                         readingChapterByBook = it.readingChapterByBook + remoteChapterMap,
+                        readingPositionByBook = it.readingPositionByBook + remotePositionMap,
                         lastSyncMessage = "已拉取 ${response.items.size} 条云端进度",
                     )
                 }
@@ -873,7 +921,13 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                     val targetListIndex = _state.value.chapters.indexOfFirst { chapter ->
                         chapter.idx == match.chapterIdx
                     }.let { if (it < 0) 0 else it }
-                    viewModelScope.launch { loadChapterInternal(targetListIndex, pushProgress = false) }
+                    viewModelScope.launch {
+                        loadChapterInternal(
+                            targetListIndex,
+                            pushProgress = false,
+                            restorePosition = match.position,
+                        )
+                    }
                 }
             },
             onErrorPrefix = "拉取云端进度失败",
@@ -903,7 +957,111 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun syncOnAppBackground() {
+        persistCurrentReadingProgress()
         syncCurrentProgress(force = false)
+    }
+
+    fun setReaderVisible(visible: Boolean) {
+        _state.update {
+            it.copy(
+                readerVisible = visible,
+                pendingReaderCommand = if (visible) it.pendingReaderCommand else ReaderHardwareAction.NONE,
+            )
+        }
+    }
+
+    fun handleReaderHardwareKey(keyCode: Int): Boolean {
+        if (!_state.value.readerVisible) {
+            return false
+        }
+        val command = when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_PAGE_UP,
+            KeyEvent.KEYCODE_VOLUME_UP,
+            -> ReaderHardwareAction.PREVIOUS_PAGE
+
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_PAGE_DOWN,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            -> ReaderHardwareAction.NEXT_PAGE
+
+            else -> ReaderHardwareAction.NONE
+        }
+        if (command == ReaderHardwareAction.NONE) {
+            return false
+        }
+        _state.update {
+            it.copy(
+                pendingReaderCommand = command,
+                readerCommandSignal = it.readerCommandSignal + 1,
+            )
+        }
+        return true
+    }
+
+    fun updateActiveChapterPosition(position: Double) {
+        val bookKey = _state.value.activeBookKey ?: return
+        val normalizedChunkPosition = normalizeReadingPosition(position)
+        val snapshot = _state.value
+        val normalizedGlobalPosition = resolveGlobalChapterPosition(snapshot, normalizedChunkPosition)
+        if (kotlin.math.abs(normalizedGlobalPosition - snapshot.activeChapterPosition) < 0.02) {
+            return
+        }
+        _state.update {
+            it.copy(
+                activeChapterPosition = normalizedGlobalPosition,
+                activeChapterScrollPosition = normalizedChunkPosition,
+                readingPositionByBook = it.readingPositionByBook + (bookKey to normalizedGlobalPosition),
+            )
+        }
+
+        maybeSwitchChapterRenderChunk(bookKey)
+    }
+
+    fun persistCurrentReadingProgress() {
+        persistActiveBookReadingChapter()
+    }
+
+    fun refreshActiveBookCache() {
+        viewModelScope.launch {
+            val activeBook = currentActiveShelfBook()
+            if (activeBook == null) {
+                _state.update { it.copy(errorMessage = "当前没有可缓存的本地书籍") }
+                return@launch
+            }
+            offlineLocalShelfBookToDevice(activeBook)
+        }
+    }
+
+    fun resolveSyncConflictUseRemote() {
+        val conflict = _state.value.syncConflict ?: return
+        applyRemoteProgress(conflict.remote, "已采用云端进度")
+    }
+
+    fun forceSyncConflictLocal() {
+        val conflict = _state.value.syncConflict ?: return
+        viewModelScope.launch {
+            runCatching { repository.upsertSyncProgress(conflict.local.copy(force = true)) }
+                .onSuccess { item ->
+                    if (handleSyncUpsertResponse(conflict.local.copy(force = true), item, "强制覆盖云端进度")) {
+                        _state.update {
+                            it.copy(lastSyncMessage = "已强制覆盖云端进度 rev=${item.revision}")
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            errorMessage = formatError("强制覆盖云端进度失败", error),
+                            lastSyncMessage = "强制覆盖云端进度失败",
+                        )
+                    }
+                }
+        }
+    }
+
+    fun dismissSyncConflict() {
+        clearSyncConflict("同步冲突待处理，已暂时关闭提示")
     }
 
     fun clearClientCache() {
@@ -924,15 +1082,25 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         activeSourceUrl = null,
                         chapters = emptyList(),
                         activeChapterListIndex = 0,
+                        activeChapterCached = false,
                         activeChapterTitle = "",
+                        activeChapterPosition = 0.0,
+                        activeChapterScrollPosition = 0.0,
+                        chapterRenderChunkIndex = 0,
+                        chapterRenderChunkCount = 1,
+                        chapterRenderChunkStart = 0,
+                        chapterRenderChunkEnd = 0,
+                        chapterRenderTotalChars = 0,
                         chapterType = "novel",
                         chapterImages = emptyList(),
                         chapterText = "",
                         readingChapterByBook = emptyMap(),
+                        readingPositionByBook = emptyMap(),
                         localCacheStatusMessage = "本地缓存已清理",
                         lastSyncMessage = "本地缓存已清理",
                         clientCacheStats = latestClientStats,
                         clientCacheMessage = "本地缓存已清理（章节 ${latestClientStats.chapterEntries} 条）",
+                        syncConflict = null,
                     )
                 }
                 clearPendingSyncQueue("本地缓存已清理，待补传队列已清空")
@@ -1003,15 +1171,16 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         errorMessage = null,
                         serverBooks = result.books,
                         bookCategories = result.categories,
-                        offlineCatalog = result.catalog,
                         readerFonts = result.readerFonts,
                         readingChapterByBook = state.readingChapterByBook + result.remoteChapterMap,
+                        readingPositionByBook = state.readingPositionByBook + result.remotePositionMap,
                         syncCursor = result.nextCursor,
                         lastSyncRevision = maxOf(state.lastSyncRevision, result.progressRevision, result.nextCursor),
                         serverCacheStats = result.serverCacheStats,
                         clientCacheStats = result.clientCacheStats,
                         selectedCategory = selected,
                         pendingSyncCount = pendingSyncQueue.size,
+                        syncConflict = result.syncConflict ?: state.syncConflict,
                         lastSyncMessage = "${result.reason}：全量同步完成",
                     )
                 }
@@ -1025,9 +1194,16 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun performFullSync(reason: String): FullSyncResult {
         networkGate.requireWifiOnline("全量同步")
         val snapshot = _state.value
-        val progressRevision = buildProgressPayload(snapshot)?.let { payload ->
-            runCatching { repository.upsertSyncProgress(payload).revision }.getOrDefault(0)
-        } ?: 0
+        val syncConflict = buildProgressPayload(snapshot)?.let { payload ->
+            runCatching { repository.upsertSyncProgress(payload) }.getOrNull()?.let { item ->
+                if (item.accepted && !item.conflict) {
+                    null
+                } else {
+                    buildSyncConflict(payload, item)
+                }
+            }
+        }
+        val progressRevision = syncConflict?.remote?.revision ?: 0
         val pulled = if (snapshot.userId.isNotBlank()) {
             repository.pullSyncProgress(snapshot.userId, since = 0, limit = 200)
         } else {
@@ -1039,19 +1215,18 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             reason = reason,
             books = repository.getBooks(),
             categories = repository.getBookCategories().filter { !it.hidden },
-            catalog = if (snapshot.userId.isNotBlank() && snapshot.deviceId.isNotBlank()) {
-                repository.getOfflineCatalog(snapshot.userId, snapshot.deviceId)
-            } else {
-                emptyList()
-            },
             readerFonts = buildReaderFontOptions(serverFonts, localPaths),
             remoteChapterMap = pulled?.items.orEmpty().associate { item ->
                 resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl) to (item.chapterIdx + 1).coerceAtLeast(1)
+            },
+            remotePositionMap = pulled?.items.orEmpty().associate { item ->
+                resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl) to normalizeReadingPosition(item.position)
             },
             nextCursor = pulled?.nextCursor ?: snapshot.syncCursor,
             progressRevision = progressRevision,
             serverCacheStats = repository.getServerCacheStats(),
             clientCacheStats = repository.getClientCacheStats(),
+            syncConflict = syncConflict,
         )
     }
 
@@ -1061,6 +1236,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         sourceUrl: String,
         bookName: String,
         preferredChapterNumber: Int,
+        preferredPosition: Double = 0.0,
     ) {
         runRequest(
             block = { repository.getLocalChapterIndex(bookKey).sortedBy { it.idx } },
@@ -1076,7 +1252,15 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                             activeSourceUrl = sourceUrl,
                             chapters = emptyList(),
                             activeChapterListIndex = 0,
+                            activeChapterCached = false,
                             activeChapterTitle = "",
+                            activeChapterPosition = 0.0,
+                            activeChapterScrollPosition = 0.0,
+                            chapterRenderChunkIndex = 0,
+                            chapterRenderChunkCount = 1,
+                            chapterRenderChunkStart = 0,
+                            chapterRenderChunkEnd = 0,
+                            chapterRenderTotalChars = 0,
                             chapterText = "本书尚未缓存到本地，WiFi 关闭时不会自动联网拉取内容。",
                             autoPageTurnEnabled = false,
                         )
@@ -1095,6 +1279,14 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         activeSourceUrl = sourceUrl,
                         chapters = chapters,
                         activeChapterListIndex = preferredIndex,
+                        activeChapterCached = chapters[preferredIndex].isCached,
+                        activeChapterPosition = normalizeReadingPosition(preferredPosition),
+                        activeChapterScrollPosition = normalizeReadingPosition(preferredPosition),
+                        chapterRenderChunkIndex = 0,
+                        chapterRenderChunkCount = 1,
+                        chapterRenderChunkStart = 0,
+                        chapterRenderChunkEnd = 0,
+                        chapterRenderTotalChars = 0,
                         autoPageTurnEnabled = false,
                     )
                 }
@@ -1102,24 +1294,45 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                     currentActiveShelfBook()?.let { shelfBook ->
                         runCatching { repository.seedLocalChapterIndex(shelfBook, chapters) }
                     }
-                    loadChapterInternal(preferredIndex, pushProgress = false)
+                    loadChapterInternal(
+                        preferredIndex,
+                        pushProgress = false,
+                        restorePosition = preferredPosition,
+                    )
                 }
             },
             onErrorPrefix = "打开书籍失败",
         )
     }
 
-    private suspend fun loadChapterInternal(chapterListIndex: Int, pushProgress: Boolean) {
+    private suspend fun loadChapterInternal(
+        chapterListIndex: Int,
+        pushProgress: Boolean,
+        restorePosition: Double? = null,
+    ) {
         val snapshot = _state.value
         val activeBook = currentActiveShelfBook() ?: return
         val chapter = snapshot.chapters.getOrNull(chapterListIndex) ?: return
+        val normalizedRestorePosition = normalizeReadingPosition(
+            restorePosition ?: snapshot.readingPositionByBook[activeBook.bookKey] ?: 0.0
+        )
 
         _state.update {
+            val emptyChunk = computeChunkState("", normalizedRestorePosition)
             it.copy(
                 isLoading = true,
                 errorMessage = null,
                 activeChapterListIndex = chapterListIndex,
+                activeChapterCached = chapter.isCached,
                 activeChapterTitle = chapter.title,
+                activeChapterPosition = normalizedRestorePosition,
+                activeChapterScrollPosition = emptyChunk.chunkPosition,
+                chapterRenderChunkIndex = emptyChunk.chunkIndex,
+                chapterRenderChunkCount = emptyChunk.chunkCount,
+                chapterRenderChunkStart = emptyChunk.chunkStart,
+                chapterRenderChunkEnd = emptyChunk.chunkEnd,
+                chapterRenderTotalChars = emptyChunk.totalChars,
+                chapterRestoreToken = it.chapterRestoreToken + 1,
                 chapterImages = emptyList(),
                 chapterText = "章节加载中...",
                 autoPageTurnEnabled = false,
@@ -1133,8 +1346,16 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        activeChapterCached = false,
                         chapterType = "novel",
                         chapterImages = emptyList(),
+                        activeChapterPosition = 0.0,
+                        activeChapterScrollPosition = 0.0,
+                        chapterRenderChunkIndex = 0,
+                        chapterRenderChunkCount = 1,
+                        chapterRenderChunkStart = 0,
+                        chapterRenderChunkEnd = 0,
+                        chapterRenderTotalChars = 0,
                         chapterText = "本章未缓存。WiFi 关闭时不会自动联网；请在书架中选择更新本地缓存。",
                         localCacheStatusMessage = "${activeBook.name}: 第 ${chapter.idx + 1} 章未缓存",
                     )
@@ -1149,6 +1370,14 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        activeChapterCached = true,
+                        activeChapterPosition = normalizedRestorePosition,
+                        activeChapterScrollPosition = normalizeReadingPosition(normalizedRestorePosition),
+                        chapterRenderChunkIndex = 0,
+                        chapterRenderChunkCount = 1,
+                        chapterRenderChunkStart = 0,
+                        chapterRenderChunkEnd = 0,
+                        chapterRenderTotalChars = 0,
                         chapterType = "manga",
                         chapterImages = content.images,
                         chapterText = buildMangaPlaceholder(content.images),
@@ -1156,12 +1385,21 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } else {
                 val cacheSummary = repository.getLocalCacheSummary(activeBook.bookKey)
+                val chunk = computeChunkState(content.content, normalizedRestorePosition)
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        activeChapterCached = true,
+                        activeChapterPosition = normalizedRestorePosition,
+                        activeChapterScrollPosition = chunk.chunkPosition,
+                        chapterRenderChunkIndex = chunk.chunkIndex,
+                        chapterRenderChunkCount = chunk.chunkCount,
+                        chapterRenderChunkStart = chunk.chunkStart,
+                        chapterRenderChunkEnd = chunk.chunkEnd,
+                        chapterRenderTotalChars = chunk.totalChars,
                         chapterType = "novel",
                         chapterImages = emptyList(),
-                        chapterText = content.content.ifBlank { "本章内容为空" },
+                        chapterText = chunk.chunkText,
                         localCacheStatusMessage = "本地缓存 ${cacheSummary.cached}/${cacheSummary.total}",
                     )
                 }
@@ -1193,12 +1431,16 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(lastSyncMessage = "WiFi 未连接，已阻止 $operationLabel") }
             return
         }
+        serverOfflineTaskMonitorJob?.cancel()
         _state.update {
             it.copy(
                 offlineDownloadActive = true,
                 isLoading = true,
                 errorMessage = null,
+                activeOfflineTask = null,
+                activeLocalCache = null,
                 localCacheStatusMessage = "$operationLabel 已开始",
+                offlineTaskStatusMessage = "$operationLabel：等待服务器任务创建",
             )
         }
 
@@ -1206,9 +1448,33 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             scope = viewModelScope,
             prepareBook = prepareBook,
             createServerTask = createServerTask,
-            onProgress = { book, cached, total, failed ->
+            onServerTaskUpdate = { book, task ->
                 _state.update {
-                    it.copy(localCacheStatusMessage = "${book.name}: 本地 $cached/$total，失败 $failed")
+                    it.copy(
+                        activeOfflineTask = ActiveOfflineTaskState(
+                            taskId = task.taskId,
+                            bookName = book.name,
+                            status = task.status,
+                            progress = task.progress,
+                            cachedChapters = task.cachedChapters,
+                            totalChapters = task.totalChapters,
+                            errorMessage = task.errorMessage,
+                        ),
+                        offlineTaskStatusMessage = "${book.name}: 服务器 ${task.status} ${task.progress}% (${task.cachedChapters}/${task.totalChapters})",
+                    )
+                }
+            },
+            onLocalProgress = { book, cached, total, failed ->
+                _state.update {
+                    it.copy(
+                        activeLocalCache = ActiveLocalCacheState(
+                            bookName = book.name,
+                            cachedChapters = cached,
+                            totalChapters = total,
+                            failedChapters = failed,
+                        ),
+                        localCacheStatusMessage = "${book.name}: 本地 $cached/$total，失败 $failed",
+                    )
                 }
             },
             onComplete = { result -> handleOfflineDownloadComplete(result) },
@@ -1222,12 +1488,27 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 offlineDownloadActive = false,
                 isLoading = false,
                 errorMessage = null,
+                activeOfflineTask = ActiveOfflineTaskState(
+                    taskId = result.serverTask.taskId,
+                    bookName = result.shelfBook.name,
+                    status = result.serverTask.status,
+                    progress = result.serverTask.progress,
+                    cachedChapters = result.serverTask.cachedChapters,
+                    totalChapters = result.serverTask.totalChapters,
+                    errorMessage = result.serverTask.errorMessage,
+                ),
+                activeLocalCache = ActiveLocalCacheState(
+                    bookName = result.shelfBook.name,
+                    cachedChapters = result.localSummary.cached,
+                    totalChapters = result.localSummary.total,
+                    failedChapters = result.localSummary.failed,
+                ),
+                offlineTaskStatusMessage = "${result.shelfBook.name}: 服务器任务 ${result.serverTask.status}",
                 localCacheStatusMessage = "${result.shelfBook.name}: 服务器 ${result.serverTask.status}，本地 ${result.localSummary.cached}/${result.localSummary.total}，失败 ${result.localSummary.failed}",
                 lastSyncMessage = "已完成本地缓存：${result.shelfBook.name}",
             )
         }
         refreshServerBooks(showLoading = false)
-        refreshOfflineCatalog(showLoading = false)
         refreshLocalBookshelf(showLoading = false)
         refreshCacheStats(showLoading = false)
     }
@@ -1243,6 +1524,8 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 offlineDownloadActive = false,
                 isLoading = false,
                 errorMessage = if (error is CancellationException) null else message,
+                activeLocalCache = null,
+                offlineTaskStatusMessage = message,
                 localCacheStatusMessage = message,
             )
         }
@@ -1291,13 +1574,17 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         val snapshot = _state.value
         val bookKey = snapshot.activeBookKey ?: return
         val chapterNumber = (snapshot.activeChapterListIndex + 1).coerceAtLeast(1)
+        val position = normalizeReadingPosition(snapshot.activeChapterPosition)
 
         _state.update {
-            it.copy(readingChapterByBook = it.readingChapterByBook + (bookKey to chapterNumber))
+            it.copy(
+                readingChapterByBook = it.readingChapterByBook + (bookKey to chapterNumber),
+                readingPositionByBook = it.readingPositionByBook + (bookKey to position),
+            )
         }
 
         viewModelScope.launch {
-            runCatching { repository.updateLocalReadChapter(bookKey, chapterNumber) }
+            runCatching { repository.updateLocalReadProgress(bookKey, chapterNumber, position) }
         }
     }
 
@@ -1319,7 +1606,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             chapterIdx = chapter.idx,
             chapterTitle = chapter.title,
             chapterUrl = chapter.url,
-            position = 0.0,
+            position = normalizeReadingPosition(snapshot.activeChapterPosition),
         )
     }
 
@@ -1330,11 +1617,211 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = null,
                 syncCursor = maxOf(it.syncCursor, item.revision),
                 lastSyncRevision = item.revision,
+                syncConflict = null,
                 readingChapterByBook = it.readingChapterByBook + (
                     payload.bookKey to (payload.chapterIdx + 1).coerceAtLeast(1)
                 ),
+                readingPositionByBook = it.readingPositionByBook + (
+                    payload.bookKey to normalizeReadingPosition(payload.position)
+                ),
                 lastSyncMessage = "阅读进度已同步 rev=${item.revision}",
             )
+        }
+    }
+
+    private fun handleSyncUpsertResponse(
+        payload: SyncProgressUpsertRequest,
+        item: SyncProgressItem,
+        trigger: String,
+    ): Boolean {
+        if (item.accepted && !item.conflict) {
+            applySyncedProgress(payload, item)
+            return true
+        }
+
+        val conflict = buildSyncConflict(payload, item)
+        _state.update {
+            it.copy(
+                isLoading = false,
+                errorMessage = null,
+                syncConflict = conflict,
+                lastSyncRevision = maxOf(it.lastSyncRevision, item.revision),
+                syncCursor = maxOf(it.syncCursor, item.revision),
+                lastSyncMessage = "$trigger 发生冲突：${conflict.summary}",
+            )
+        }
+        return false
+    }
+
+    private fun buildSyncConflict(
+        payload: SyncProgressUpsertRequest,
+        item: SyncProgressItem,
+    ): SyncConflictState {
+        return SyncConflictState(
+            local = payload,
+            remote = item,
+            summary = describeSyncConflict(item.conflictReason),
+        )
+    }
+
+    private fun applyRemoteProgress(item: SyncProgressItem, message: String) {
+        val bookKey = resolveBookKey(item.bookKey, item.sourceUrl, item.bookUrl)
+        val chapterNumber = (item.chapterIdx + 1).coerceAtLeast(1)
+        _state.update {
+            it.copy(
+                syncConflict = null,
+                readingChapterByBook = it.readingChapterByBook + (bookKey to chapterNumber),
+                readingPositionByBook = it.readingPositionByBook + (bookKey to normalizeReadingPosition(item.position)),
+                syncCursor = maxOf(it.syncCursor, item.revision),
+                lastSyncRevision = maxOf(it.lastSyncRevision, item.revision),
+                lastSyncMessage = "$message：第 $chapterNumber 章",
+            )
+        }
+        viewModelScope.launch {
+            runCatching { repository.updateLocalReadProgress(bookKey, chapterNumber, item.position) }
+            if (_state.value.activeBookKey == bookKey && _state.value.chapters.isNotEmpty()) {
+                val targetIndex = _state.value.chapters.indexOfFirst { chapter ->
+                    chapter.idx == item.chapterIdx
+                }.let { if (it < 0) 0 else it }
+                loadChapterInternal(targetIndex, pushProgress = false, restorePosition = item.position)
+            } else {
+                refreshLocalBookshelf(showLoading = false)
+            }
+        }
+    }
+
+    private fun normalizeReadingPosition(position: Double): Double {
+        if (!position.isFinite()) {
+            return 0.0
+        }
+        return position.coerceIn(0.0, 1.0)
+    }
+
+    private fun resolveGlobalChapterPosition(snapshot: EinkUiState, chunkPosition: Double): Double {
+        if (snapshot.chapterType != "novel") {
+            return chunkPosition
+        }
+        val totalChars = snapshot.chapterRenderTotalChars
+        val chunkCount = snapshot.chapterRenderChunkCount
+        if (totalChars <= 0 || chunkCount <= 1) {
+            return chunkPosition
+        }
+        val chunkSize = chapterChunkSizeChars.toDouble()
+        val chunkIndex = snapshot.chapterRenderChunkIndex.coerceIn(0, chunkCount - 1)
+        val offset = chunkIndex.toDouble() * chunkSize
+        val absolute = offset + (chunkPosition * chunkSize)
+        return normalizeReadingPosition(absolute / totalChars.toDouble())
+    }
+
+    private fun maybeSwitchChapterRenderChunk(bookKey: String) {
+        val snapshot = _state.value
+        if (snapshot.chapterType != "novel") {
+            return
+        }
+        if (snapshot.chapterRenderChunkCount <= 1 || snapshot.chapterRenderTotalChars <= chapterChunkSizeChars) {
+            return
+        }
+
+        val desiredIndex = floor(
+            snapshot.activeChapterPosition * snapshot.chapterRenderChunkCount.toDouble()
+        ).toInt().coerceIn(0, snapshot.chapterRenderChunkCount - 1)
+
+        if (desiredIndex == snapshot.chapterRenderChunkIndex) {
+            return
+        }
+
+        val chapterIdx = snapshot.chapters.getOrNull(snapshot.activeChapterListIndex)?.idx ?: return
+        val globalPosition = snapshot.activeChapterPosition
+        viewModelScope.launch {
+            runCatching {
+                repository.getCachedChapterContent(bookKey, chapterIdx)
+            }.getOrNull()?.takeIf { it.type == "novel" }?.let { content ->
+                val chunk = computeChunkState(content.content, globalPosition)
+                _state.update { state ->
+                    if (state.activeBookKey != bookKey || state.activeChapterListIndex != snapshot.activeChapterListIndex) {
+                        return@update state
+                    }
+                    if (state.chapterType != "novel") {
+                        return@update state
+                    }
+                    state.copy(
+                        activeChapterScrollPosition = chunk.chunkPosition,
+                        chapterRenderChunkIndex = chunk.chunkIndex,
+                        chapterRenderChunkCount = chunk.chunkCount,
+                        chapterRenderChunkStart = chunk.chunkStart,
+                        chapterRenderChunkEnd = chunk.chunkEnd,
+                        chapterRenderTotalChars = chunk.totalChars,
+                        chapterRestoreToken = state.chapterRestoreToken + 1,
+                        chapterText = chunk.chunkText,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun computeChunkState(content: String, globalPosition: Double): ChapterRenderChunk {
+        val safeText = content.ifBlank { "本章内容为空" }
+        val totalChars = safeText.length
+        if (totalChars <= chapterChunkSizeChars) {
+            return ChapterRenderChunk(
+                chunkText = safeText,
+                chunkIndex = 0,
+                chunkCount = 1,
+                chunkStart = 0,
+                chunkEnd = totalChars,
+                totalChars = totalChars,
+                chunkPosition = normalizeReadingPosition(globalPosition),
+            )
+        }
+
+        val chunkCount = ceil(totalChars.toDouble() / chapterChunkSizeChars.toDouble()).toInt().coerceAtLeast(1)
+        val normalizedGlobal = normalizeReadingPosition(globalPosition)
+        val chunkIndex = floor(normalizedGlobal * chunkCount.toDouble()).toInt().coerceIn(0, chunkCount - 1)
+        val chunkStart = (chunkIndex * chapterChunkSizeChars).coerceIn(0, totalChars)
+        val chunkEnd = minOf(chunkStart + chapterChunkSizeChars, totalChars)
+        val chunkSpan = (chunkEnd - chunkStart).coerceAtLeast(1)
+        val absolutePosition = normalizedGlobal * totalChars.toDouble()
+        val chunkPosition = ((absolutePosition - chunkStart.toDouble()) / chunkSpan.toDouble()).coerceIn(0.0, 1.0)
+
+        return ChapterRenderChunk(
+            chunkText = safeText.substring(chunkStart, chunkEnd),
+            chunkIndex = chunkIndex,
+            chunkCount = chunkCount,
+            chunkStart = chunkStart,
+            chunkEnd = chunkEnd,
+            totalChars = totalChars,
+            chunkPosition = chunkPosition,
+        )
+    }
+
+    private data class ChapterRenderChunk(
+        val chunkText: String,
+        val chunkIndex: Int,
+        val chunkCount: Int,
+        val chunkStart: Int,
+        val chunkEnd: Int,
+        val totalChars: Int,
+        val chunkPosition: Double,
+    )
+
+    private fun clearSyncConflict(message: String? = null) {
+        _state.update {
+            if (it.syncConflict == null && message == null) {
+                it
+            } else {
+                it.copy(
+                    syncConflict = null,
+                    lastSyncMessage = message ?: it.lastSyncMessage,
+                )
+            }
+        }
+    }
+
+    private fun describeSyncConflict(reason: String): String {
+        return when (reason) {
+            "chapter_regression" -> "云端记录已经在更靠后的章节"
+            "position_regression" -> "云端记录在当前章节的位置更靠前"
+            else -> if (reason.isBlank()) "云端已存在更新进度" else reason
         }
     }
 
@@ -1380,12 +1867,14 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         val entries = pendingSyncQueue.values.toList()
         viewModelScope.launch {
             var successCount = 0
+            var conflictCount = 0
             for (payload in entries) {
-                val synced = runCatching { repository.upsertSyncProgress(payload) }.getOrNull()
-                if (synced != null) {
-                    pendingSyncQueue.remove(payload.bookKey)
-                    applySyncedProgress(payload, synced)
+                val synced = runCatching { repository.upsertSyncProgress(payload) }.getOrNull() ?: continue
+                pendingSyncQueue.remove(payload.bookKey)
+                if (handleSyncUpsertResponse(payload, synced, "待补传进度")) {
                     successCount += 1
+                } else {
+                    conflictCount += 1
                 }
             }
             savePendingSyncQueue()
@@ -1393,9 +1882,19 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     pendingSyncCount = pendingSyncQueue.size,
                     lastSyncMessage = if (successCount > 0) {
-                        "$trigger：已补传 $successCount 本，剩余 ${pendingSyncQueue.size} 本"
+                        buildString {
+                            append("$trigger：已补传 $successCount 本，剩余 ${pendingSyncQueue.size} 本")
+                            if (conflictCount > 0) {
+                                append("，冲突 $conflictCount 本")
+                            }
+                        }
                     } else {
-                        "$trigger：补传未成功，剩余 ${pendingSyncQueue.size} 本"
+                        buildString {
+                            append("$trigger：补传未成功，剩余 ${pendingSyncQueue.size} 本")
+                            if (conflictCount > 0) {
+                                append("，冲突 $conflictCount 本")
+                            }
+                        }
                     },
                 )
             }
@@ -1612,17 +2111,79 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun monitorActiveOfflineTask(initialTask: OfflineTaskItem, fallbackBookName: String) {
+        serverOfflineTaskMonitorJob?.cancel()
+        serverOfflineTaskMonitorJob = viewModelScope.launch {
+            try {
+                updateActiveOfflineTaskState(initialTask, fallbackBookName)
+                val latest = repository.awaitOfflineTask(initialTask.taskId) { task ->
+                    updateActiveOfflineTaskState(task, fallbackBookName)
+                }
+                updateActiveOfflineTaskState(latest, fallbackBookName)
+                refreshServerBooks(showLoading = false)
+                refreshCacheStats(showLoading = false)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                val message = formatError("跟踪服务器缓存任务失败", error)
+                _state.update {
+                    it.copy(
+                        errorMessage = message,
+                        offlineTaskStatusMessage = message,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun updateActiveOfflineTaskState(task: OfflineTaskItem, fallbackBookName: String) {
+        val resolvedBookName = task.bookName.ifBlank { fallbackBookName }.ifBlank { task.bookKey }
+        val statusMessage = buildOfflineTaskStatusMessage(
+            bookName = resolvedBookName,
+            status = task.status,
+            progress = task.progress,
+            cachedChapters = task.cachedChapters,
+            totalChapters = task.totalChapters,
+        )
+        _state.update {
+            it.copy(
+                activeOfflineTask = ActiveOfflineTaskState(
+                    taskId = task.taskId,
+                    bookName = resolvedBookName,
+                    status = task.status,
+                    progress = task.progress,
+                    cachedChapters = task.cachedChapters,
+                    totalChapters = task.totalChapters,
+                    errorMessage = task.errorMessage,
+                ),
+                offlineTaskStatusMessage = statusMessage,
+                lastSyncMessage = statusMessage,
+            )
+        }
+    }
+
+    private fun buildOfflineTaskStatusMessage(
+        bookName: String,
+        status: String,
+        progress: Int,
+        cachedChapters: Int,
+        totalChapters: Int,
+    ): String {
+        return "$bookName: 服务器 $status $progress% ($cachedChapters/$totalChapters)"
+    }
+
     private data class FullSyncResult(
         val reason: String,
         val books: List<BookItem>,
         val categories: List<BookCategoryItem>,
-        val catalog: List<OfflineCatalogItem>,
         val readerFonts: List<ReaderFontOption>,
         val remoteChapterMap: Map<String, Int>,
+        val remotePositionMap: Map<String, Double>,
         val nextCursor: Int,
         val progressRevision: Int,
         val serverCacheStats: ServerCacheStats,
         val clientCacheStats: ClientCacheStats,
+        val syncConflict: SyncConflictState?,
     )
 
     companion object {

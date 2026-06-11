@@ -112,7 +112,6 @@ fun HomePane(
                             value = state.serverBooks.size,
                             onClick = onOpenServerBookshelf,
                         )
-                        SummaryMetric(label = "离线目录", value = state.offlineCatalog.size)
                     }
                 }
             }
@@ -178,6 +177,12 @@ fun HomePane(
                             text = "设备状态",
                             style = MaterialTheme.typography.titleSmall,
                         )
+                        if (state.offlineTaskStatusMessage.isNotBlank()) {
+                            Text(
+                                text = "任务: ${state.offlineTaskStatusMessage}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                         if (state.localCacheStatusMessage.isNotBlank()) {
                             Text(
                                 text = "缓存: ${state.localCacheStatusMessage}",

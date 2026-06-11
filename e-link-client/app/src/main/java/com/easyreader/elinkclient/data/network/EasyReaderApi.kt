@@ -85,6 +85,13 @@ interface EasyReaderApi {
         @Path("task_id") taskId: String,
     ): OfflineTaskItem
 
+    @GET("api/offline/tasks")
+    suspend fun getOfflineTasks(
+        @Query("user_id") userId: String,
+        @Query("device_id") deviceId: String,
+        @Query("limit") limit: Int,
+    ): List<OfflineTaskItem>
+
     @GET("api/offline/catalog")
     suspend fun getOfflineCatalog(
         @Query("user_id") userId: String,

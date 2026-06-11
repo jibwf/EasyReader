@@ -70,12 +70,11 @@ E-link Android     ->  FastAPI  -> data/cache
                                 -> data/fonts
 ```
 
-更详细的架构、边界和 API 契约见：
+更详细的架构、阶段状态和客户端说明见：
 
 - [docs/README.md](docs/README.md)
 - [docs/architecture.md](docs/architecture.md)
-- [docs/client-server-contract.md](docs/client-server-contract.md)
-- [docs/next-stage-execution-plan.md](docs/next-stage-execution-plan.md)
+- [docs/phase1.md](docs/phase1.md)
 - [e-link-client/docs/eink-client-plan.md](e-link-client/docs/eink-client-plan.md)
 
 ## 开发协作说明
@@ -102,7 +101,7 @@ EasyReader/
 ├── e-link-client/ # 墨水屏 Android 客户端
 ├── data/          # SQLite、缓存、导出文件和字体文件
 ├── tests/         # 后端回归测试
-├── docs/          # 架构、契约和阶段方案文档
+├── docs/          # 架构、阶段和共享约束文档
 └── Dockerfile     # 单容器构建入口
 ```
 
@@ -197,29 +196,25 @@ docker run --rm -p 8080:8080 -v $(pwd)/data:/app/data easyreader
 
 已经完成的重点能力：
 
-- 服务端书源解析、搜索、详情、目录和正文抓取。
-- 书架内一体化书籍管理。
-- 本地 TXT / EPUB 导入并直接阅读。
-- 导出前自动服务端预缓存。
-- 服务端与浏览器缓存统计 / 清理。
-- PWA 安装、浏览器端离线重读和章节预取。
-- 多端进度同步、书签同步、离线目录 API 基线。
-- 墨水屏 Android 客户端工程基线。
+- 服务端资源身份、搜索排序、源健康度、同步幂等和离线任务层重构。
+- 书架内一体化书籍管理，以及本地 `TXT` / `EPUB` 导入阅读。
+- Web PWA 的 IndexedDB + Workbox 双层缓存、`fast/full` 搜索、自动翻页和冲突处理。
+- 多端进度同步、书签同步、后台离线任务与离线目录 API。
+- 墨水屏 Android 客户端的 `book_key` 基线、本地缓存阅读、WiFi 闸门和离线任务接入。
 - 关键后端回归测试覆盖。
 
-下一阶段重点：
+当前阶段主线：
 
-- 服务端资源身份、搜索排序、源健康度、任务层和同步幂等性重构。
-- 书源搜索准确度和速度优化。
-- PWA 与墨水屏客户端自动翻页。
-- 有声书 / 音频任务与缓存能力。
+- 墨水屏客户端补齐请求头、同步冲突处理和显式离线任务状态机。
+- 阅读器设备交互收口，包括实体按键、缺章入口和刷新策略协同。
+- 有声书 / 音频任务能力仍放在墨水屏客户端收口之后。
 
 ## 当前限制
 
 - 还没有统一账号 / 鉴权系统；当前 `user_id` 与 `device_id` 仍由客户端自管。
 - 还没有有声书 / 音频任务能力。
-- `/api/offline/tasks` 当前是同步执行的任务风格接口，不是真正后台任务队列。
-- Web PWA 是混合在线优先客户端，不能直接等同于墨水屏客户端策略。
+- Android 墨水屏客户端还没有完全补齐请求头、同步冲突语义和显式任务 UI。
+- Web PWA 是在线优先 + 本地缓存增强客户端，不能直接等同于墨水屏客户端策略。
 - RSS 和漫画暂时不进入下一阶段路线。
 
 ## 许可证

@@ -190,6 +190,14 @@ class ReaderRepository(
             }
         }
 
+    suspend fun getOfflineTasks(userId: String, deviceId: String, limit: Int = 200): List<OfflineTaskItem> =
+        withContext(Dispatchers.IO) {
+            networkGate.requireWifiOnline("拉取服务器离线任务")
+            api.getOfflineTasks(userId = userId, deviceId = deviceId, limit = limit).map { task ->
+                task.copy(bookKey = resolveBookKey(task.bookKey, task.sourceUrl, task.bookUrl))
+            }
+        }
+
     suspend fun getClientCacheStats(): ClientCacheStats = withContext(Dispatchers.IO) {
         localStore.getClientCacheStats()
     }
@@ -272,8 +280,7 @@ class ReaderRepository(
         bookUrl: String? = null,
         sourceUrl: String? = null,
     ): OfflineTaskItem = withContext(Dispatchers.IO) {
-        networkGate.requireWifiOnline("创建服务器离线任务")
-        val task = api.createOfflineTask(
+        createOfflineTask(
             OfflineTaskCreateRequest(
                 userId = userId,
                 deviceId = deviceId,
@@ -283,27 +290,24 @@ class ReaderRepository(
                 sourceUrl = sourceUrl,
             )
         )
-
-        waitForOfflineTaskInternal(task.taskId)
     }
 
-    private suspend fun waitForOfflineTaskInternal(
+    suspend fun awaitOfflineTask(
         taskId: String,
         timeoutMs: Long = 180000L,
         pollIntervalMs: Long = 500L,
+        onUpdate: suspend (OfflineTaskItem) -> Unit = {},
     ): OfflineTaskItem {
         val startedAt = System.currentTimeMillis()
-        var latest = api.getOfflineTask(taskId).let { task ->
-            task.copy(bookKey = resolveBookKey(task.bookKey, task.sourceUrl, task.bookUrl))
-        }
+        var latest = getOfflineTask(taskId)
+        onUpdate(latest)
         while (latest.status == "queued" || latest.status == "running") {
             if (System.currentTimeMillis() - startedAt > timeoutMs) {
                 throw IOException("Offline task timed out: $taskId")
             }
             delay(pollIntervalMs)
-            latest = api.getOfflineTask(taskId).let { task ->
-                task.copy(bookKey = resolveBookKey(task.bookKey, task.sourceUrl, task.bookUrl))
-            }
+            latest = getOfflineTask(taskId)
+            onUpdate(latest)
         }
         return latest
     }
@@ -364,6 +368,7 @@ class ReaderRepository(
             cachedChapters = existing?.cachedChapters ?: 0,
             totalChapters = existing?.totalChapters ?: 0,
             lastReadChapter = existing?.lastReadChapter ?: 1,
+            lastReadPosition = existing?.lastReadPosition ?: 0.0,
             lastCachedAt = existing?.lastCachedAt ?: 0L,
             addedAt = existing?.addedAt ?: System.currentTimeMillis(),
         )
@@ -387,6 +392,7 @@ class ReaderRepository(
             cachedChapters = existing?.cachedChapters ?: 0,
             totalChapters = maxOf(book.totalChapters, existing?.totalChapters ?: 0),
             lastReadChapter = existing?.lastReadChapter ?: 1,
+            lastReadPosition = existing?.lastReadPosition ?: 0.0,
             lastCachedAt = existing?.lastCachedAt ?: 0L,
             addedAt = existing?.addedAt ?: System.currentTimeMillis(),
         )
@@ -492,6 +498,10 @@ class ReaderRepository(
 
     suspend fun updateLocalReadChapter(bookKey: String, chapterNumber: Int) {
         localStore.updateLastReadChapter(bookKey, chapterNumber)
+    }
+
+    suspend fun updateLocalReadProgress(bookKey: String, chapterNumber: Int, position: Double) {
+        localStore.updateLastReadProgress(bookKey, chapterNumber, position)
     }
 
     suspend fun upsertSyncProgress(payload: SyncProgressUpsertRequest): SyncProgressItem =

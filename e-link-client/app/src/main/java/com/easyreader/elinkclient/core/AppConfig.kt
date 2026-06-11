@@ -3,6 +3,8 @@ package com.easyreader.elinkclient.core
 object AppConfig {
     const val DEFAULT_BASE_URL = "https://re.dclife.fun:59999/"
     const val DEFAULT_USER_ID = "u1"
+    const val CLIENT_TYPE = "eink-android"
+    const val API_CONTRACT_VERSION = "2026-06-11"
     const val PREFS_NAME = "elink_client_prefs"
     const val KEY_BASE_URL = "base_url"
     const val KEY_USER_ID = "user_id"

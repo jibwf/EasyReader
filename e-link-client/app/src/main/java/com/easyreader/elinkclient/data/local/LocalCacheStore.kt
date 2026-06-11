@@ -48,11 +48,24 @@ class LocalCacheStore(
             }
             if (index >= 0) {
                 val existing = current[index]
+                val mergedLastReadChapter = if (book.lastReadChapter > 0) {
+                    book.lastReadChapter
+                } else {
+                    existing.lastReadChapter
+                }
+                val mergedLastReadPosition = when {
+                    mergedLastReadChapter == book.lastReadChapter && mergedLastReadChapter == existing.lastReadChapter -> {
+                        maxOf(normalizeProgress(book.lastReadPosition), normalizeProgress(existing.lastReadPosition))
+                    }
+                    mergedLastReadChapter == book.lastReadChapter -> normalizeProgress(book.lastReadPosition)
+                    else -> normalizeProgress(existing.lastReadPosition)
+                }
                 current[index] = book.copy(
                     addedAt = existing.addedAt,
                     cachedChapters = maxOf(book.cachedChapters, existing.cachedChapters),
                     totalChapters = maxOf(book.totalChapters, existing.totalChapters),
-                    lastReadChapter = if (book.lastReadChapter > 0) book.lastReadChapter else existing.lastReadChapter,
+                    lastReadChapter = mergedLastReadChapter,
+                    lastReadPosition = mergedLastReadPosition,
                     lastCachedAt = maxOf(book.lastCachedAt, existing.lastCachedAt),
                 )
             } else {
@@ -125,6 +138,7 @@ class LocalCacheStore(
                     title = it.title,
                     url = it.url,
                     idx = it.idx,
+                    isCached = it.isCached,
                 )
             }
         }
@@ -341,9 +355,14 @@ class LocalCacheStore(
     }
 
     suspend fun updateLastReadChapter(bookKey: String, chapterNumber: Int): Unit = withContext(Dispatchers.IO) {
+        updateLastReadProgress(bookKey, chapterNumber, 0.0)
+    }
+
+    suspend fun updateLastReadProgress(bookKey: String, chapterNumber: Int, position: Double): Unit = withContext(Dispatchers.IO) {
         mutex.withLock {
             ensureRootLocked()
             val normalized = chapterNumber.coerceAtLeast(1)
+            val normalizedPosition = normalizeProgress(position)
             val books = readBookshelfLocked().toMutableList()
             val index = books.indexOfFirst {
                 it.bookKey == bookKey
@@ -351,7 +370,10 @@ class LocalCacheStore(
             if (index < 0) {
                 return@withLock
             }
-            books[index] = books[index].copy(lastReadChapter = normalized)
+            books[index] = books[index].copy(
+                lastReadChapter = normalized,
+                lastReadPosition = normalizedPosition,
+            )
             writeBookshelfLocked(books.sortedByDescending { it.addedAt })
         }
     }
@@ -400,6 +422,7 @@ class LocalCacheStore(
             book.copy(
                 bookKey = resolvedBookKey,
                 lastReadChapter = book.lastReadChapter.coerceAtLeast(1),
+                lastReadPosition = normalizeProgress(book.lastReadPosition),
             )
         }
     }
@@ -412,10 +435,18 @@ class LocalCacheStore(
             deduplicated[resolvedBookKey] = book.copy(
                 bookKey = resolvedBookKey,
                 lastReadChapter = book.lastReadChapter.coerceAtLeast(1),
+                lastReadPosition = normalizeProgress(book.lastReadPosition),
             )
         }
         val normalized = deduplicated.values.sortedByDescending { it.addedAt }
         writeTextAtomic(bookshelfFile, bookshelfAdapter.toJson(normalized))
+    }
+
+    private fun normalizeProgress(position: Double): Double {
+        if (!position.isFinite()) {
+            return 0.0
+        }
+        return position.coerceIn(0.0, 1.0)
     }
 
     private fun readMetaLocked(

@@ -1,6 +1,9 @@
 package com.easyreader.elinkclient.data.network
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import com.easyreader.elinkclient.core.AppConfig
 import com.easyreader.elinkclient.core.DeviceProfile
 import com.easyreader.elinkclient.core.NetworkGate
 import com.squareup.moshi.Moshi
@@ -17,6 +20,7 @@ import java.util.concurrent.TimeUnit
 object NetworkModule {
     fun createHttpClient(context: Context, networkGate: NetworkGate): OkHttpClient {
         val isLowRamDevice = DeviceProfile.isLowRamDevice(context)
+        val clientVersion = resolveClientVersion(context)
         val cacheSizeBytes = if (isLowRamDevice) {
             4L * 1024L * 1024L
         } else {
@@ -31,7 +35,12 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val request = chain.request()
                 networkGate.requireWifiOnline("${request.method} ${request.url.encodedPath}")
-                chain.proceed(request)
+                val clientRequest = request.newBuilder()
+                    .header("X-Client-Type", AppConfig.CLIENT_TYPE)
+                    .header("X-Client-Version", clientVersion)
+                    .header("X-API-Contract-Version", AppConfig.API_CONTRACT_VERSION)
+                    .build()
+                chain.proceed(clientRequest)
             }
             .dispatcher(dispatcher)
             .connectionPool(
@@ -66,5 +75,21 @@ object NetworkModule {
             .build()
 
         return retrofit.create(EasyReaderApi::class.java)
+    }
+
+    private fun resolveClientVersion(context: Context): String {
+        val versionName = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.PackageInfoFlags.of(0),
+                ).versionName
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }
+        }.getOrNull()
+
+        return versionName?.ifBlank { "dev" } ?: "dev"
     }
 }

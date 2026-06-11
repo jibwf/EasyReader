@@ -4,6 +4,7 @@ import com.easyreader.elinkclient.data.model.LocalCacheSummary
 import com.easyreader.elinkclient.data.model.LocalShelfBook
 import com.easyreader.elinkclient.data.model.OfflineTaskItem
 import com.easyreader.elinkclient.data.repository.ReaderRepository
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -32,7 +33,8 @@ class OfflineDownloadManager(
         scope: CoroutineScope,
         prepareBook: suspend () -> LocalShelfBook,
         createServerTask: suspend (LocalShelfBook) -> OfflineTaskItem,
-        onProgress: suspend (book: LocalShelfBook, cached: Int, total: Int, failed: Int) -> Unit,
+        onServerTaskUpdate: suspend (book: LocalShelfBook, task: OfflineTaskItem) -> Unit,
+        onLocalProgress: suspend (book: LocalShelfBook, cached: Int, total: Int, failed: Int) -> Unit,
         onComplete: suspend (OfflineDownloadResult) -> Unit,
         onError: suspend (Throwable) -> Unit,
     ) {
@@ -40,9 +42,15 @@ class OfflineDownloadManager(
         activeJob = scope.launch {
             runCatching {
                 val shelfBook = prepareBook()
-                val serverTask = createServerTask(shelfBook)
+                val initialTask = createServerTask(shelfBook)
+                val serverTask = repository.awaitOfflineTask(initialTask.taskId) { task ->
+                    onServerTaskUpdate(shelfBook, task)
+                }
+                if (serverTask.status != "completed") {
+                    throw IOException(serverTask.errorMessage.ifBlank { "服务器离线任务 ${serverTask.status}" })
+                }
                 val summary = repository.cacheBookToLocal(shelfBook) { cached, total, failed ->
-                    onProgress(shelfBook, cached, total, failed)
+                    onLocalProgress(shelfBook, cached, total, failed)
                 }
                 OfflineDownloadResult(
                     shelfBook = shelfBook,

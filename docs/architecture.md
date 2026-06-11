@@ -1,39 +1,31 @@
-# EasyReader 架构方案
+# EasyReader 架构文档
 
 更新时间：2026-06-11
 
-## 审计结论
+## 文档目的
 
-当前仓库已经不是最初那份“待搭骨架”的方案状态了，但也还没有进入完整产品态。
+这份文档只负责四件事：
 
-代码审计后的真实状态是：
+- 整体系统架构。
+- 服务端架构。
+- Web PWA 架构。
+- 共享 API 约束。
 
-- 服务端已经完成书源解析、书架管理、内容获取、服务端缓存、同步进度、书签同步、离线任务、离线目录、字体分发等一组可复用后端能力。
-- Web 端已经是可安装 PWA，提供书架、搜索、阅读、设置、离线目录等能力，并具备 IndexedDB + Workbox 的双层离线缓存。
-- `e-link-client/` 已经是独立 Android 工程，但它的正确定位不是“PWA 的原生壳”，而是本地阅读优先的墨水屏专用客户端。
-- 当前仓库还没有真正落地统一账号、鉴权、有声书、后台任务队列。
-- 下一阶段产品路线已经调整：RSS 和漫画暂时从路线图删除，账号 / 鉴权降为低优先级；服务端核心重构、搜索准确度与速度、自动翻页、有声书成为下一步重点。
+它不负责记录阶段状态、已完成功能清单、部署验收结果和下一步排期；这些内容统一放在 `docs/phase1.md`。墨水屏客户端的内部架构统一放在 `e-link-client/docs/eink-client-plan.md`。
 
-因此，这份文档不再把“未来愿景”和“当前实现”混写，而是明确区分：
+## 整体架构
 
-- 当前真实实现
-- 多端职责边界
-- 下一阶段的重构方向
+EasyReader 当前是一个共享内容与共享状态中心驱动的多客户端系统：
 
-## 当前部署形态
+- 服务端负责书源解析、共享数据、共享状态和后台任务。
+- Web PWA 负责在线优先的通用阅读体验与浏览器侧缓存。
+- 墨水屏客户端负责本地阅读优先、设备适配和低功耗交互。
 
-当前生产形态是单容器部署：
-
-- 前端在 Docker 构建阶段打包为静态文件。
-- FastAPI 在运行时同时提供 `/api/*` 和静态文件 SPA 回退。
-- 运行期数据全部写入 `data/` volume。
-- 容器启动时会把内置字体种子复制到 `data/fonts/`。
-
-运行时拓扑：
+逻辑拓扑：
 
 ```mermaid
 flowchart LR
-    Browser[Web PWA] --> API[FastAPI Server]
+    PWA[Web PWA] --> API[FastAPI Server]
     Eink[E-link Client] --> API
     API --> DB[(SQLite)]
     API --> Cache[data/cache]
@@ -41,187 +33,146 @@ flowchart LR
     API --> Exports[data/exports]
 ```
 
-## 当前代码模块
+### 角色边界
 
-### 服务端
+| 领域 | 服务端负责 | PWA 负责 | 墨水屏客户端负责 |
+| --- | --- | --- | --- |
+| 书源能力 | 搜索、详情、目录、正文抓取与清洗 | 不执行书源规则 | 不执行书源规则 |
+| 共享数据 | 书架主数据、服务端缓存、字体、导出 | 展示与调用 | 展示与调用 |
+| 共享状态 | 阅读进度、书签、离线任务状态 | 消费与上报 | 消费与上报 |
+| 阅读交互 | 不负责 | 浏览器阅读体验 | 墨水屏阅读体验 |
+| 设备能力 | 不负责 | 浏览器缓存/PWA 安装 | 刷新模式、实体按键、触控热区 |
 
-- `backend/engine/`: 书源规则引擎与抓取器。
-- `backend/services/`: 搜索、内容、书架、导出、字体、同步等业务逻辑。
-- `backend/routers/`: 对外 API 路由。
-- `backend/database.py`: SQLite schema 与迁移。
+边界原则：
 
-### Web PWA
+- 服务端输出稳定数据与共享状态，不承载客户端 UI 状态机。
+- 客户端负责阅读体验，不负责书源规则执行。
+- PWA 保持在线优先；墨水屏客户端保持本地阅读优先。
 
-- `frontend/src/pages/`: 书架、阅读、搜索、设置、离线目录等页面。
-- `frontend/src/api/client.ts`: 统一 API 客户端。
-- `frontend/src/utils/chapter-cache.ts`: IndexedDB 章节缓存。
-- `frontend/src/utils/local-cache.ts`: localStorage 快照缓存。
-- `frontend/vite.config.ts`: PWA manifest 与 Workbox runtime caching。
+## 服务端架构
 
-### 墨水屏客户端
+服务端当前应被理解为“共享内容与共享状态中心”，核心上由四层组成：
 
-- `e-link-client/`: 独立 Android 工程。
-- 其产品方案见 [e-link-client/docs/eink-client-plan.md](../e-link-client/docs/eink-client-plan.md)。
+### 1. 规则与抓取层
 
-## 多端角色定义
+- `backend/engine/` 负责书源规则解析、抓取、解析器和脚本引擎。
+- 这一层只解决“如何从书源拿到规范化数据”，不关心客户端 UI。
 
-### 服务端
+### 2. 业务服务层
 
-服务端当前应该被理解为“共享内容与共享状态中心”，并逐步重构成“内容中心 + 状态同步中心 + 任务中心”，而不是前端 UI 的延伸。
+- `backend/services/book_manager.py`：书架主数据、章节缓存、导出前置数据。
+- `backend/services/content.py`：书籍详情、目录、章节内容读取。
+- `backend/services/search.py`：搜索聚合、去重、排序、源健康度、缓存、`fast/full` 模式。
+- `backend/services/sync_manager.py`：阅读进度、书签、离线任务、目录汇总。
+- `backend/services/font_library.py`：字体资源管理。
 
-它负责：
+### 3. API 路由层
 
-- 书源规则执行与内容抓取。
-- 书架主数据、分类、服务端章节缓存、导出。
-- 共享阅读进度、书签同步、离线目录摘要。
-- 搜索编排、结果去重、排序、源健康度与搜索缓存。
-- 离线缓存任务和后续有声书任务。
-- 字体资源分发。
-- Web PWA 与墨水屏客户端都可复用的稳定 API。
+- `backend/routers/` 对外暴露 `/api/*`。
+- 路由层只做协议和参数边界，不承担核心业务判断。
 
-它当前不负责：
+### 4. 存储与任务层
 
-- 客户端排版与阅读器 UI。
-- 墨水屏刷新、实体按键、触控热区。
-- 自动翻页的页面计算和设备交互。
-- 当前阶段不优先承载账号体系与权限控制。
-- RSS 和漫画功能扩展。
+- `backend/database.py` 定义 SQLite schema。
+- SQLite 同时承担书架、同步、任务和缓存元数据存储。
+- 离线任务由同进程后台任务执行，并把状态落库供轮询读取。
 
-### Web PWA
+### 服务端核心架构约束
 
-Web 端当前定位是“混合在线优先客户端”：
+- 资源身份以 `book_key` 为中心，不再以 `book_url + source_url` 作为长期主键。
+- 搜索输出的是服务端聚合后的结果，不把排序与去重职责下放给客户端。
+- 同步以 `user_id + book_key` 为共享进度主键。
+- 离线缓存使用后台任务模型，而不是请求内同步执行模型。
 
-- 适合浏览器 / Android 主屏安装。
-- 默认联网请求最新书架、目录、正文和同步状态。
-- 同时把目录、章节、离线目录快照写入本地缓存，以支持离线重读。
-- 允许预取后续章节，强调通用阅读体验和安装便利。
-- 下一步承担自动翻页和有声书播放器体验。
+## Web PWA 架构
 
-它当前不是：
+Web PWA 当前是一个“在线优先 + 本地缓存增强”的客户端，核心分成四层：
 
-- 纯离线客户端。
-- 墨水屏端的行为模板。
-- 原生后台下载能力完整的移动 App。
+### 1. 页面与状态层
 
-### 墨水屏客户端
+- `frontend/src/pages/` 负责书架、搜索、阅读、设置、离线目录等页面。
+- `frontend/src/stores/` 负责全局状态与流式搜索结果合并。
 
-墨水屏端定位是“本地阅读优先客户端”：
+### 2. API 访问层
 
-- 以稳定、低刷新、低干扰阅读为核心。
-- 联网行为必须服务于阅读，而不是反过来影响阅读路径。
-- 章节正文下载必须是显式动作。
-- 进度同步应该比 PWA 更保守、更低频、更可取消。
-- 下一步承担墨水屏自动翻页、实体按键映射和弱网批量补传体验。
+- `frontend/src/api/client.ts` 统一封装请求头、超时、身份查询参数与请求模型。
+- PWA 通过这层消费服务端搜索、内容、同步、离线任务和字体接口。
 
-## 当前真实能力
+### 3. 本地缓存层
 
-### 已落地
+- `frontend/src/utils/chapter-cache.ts` 负责 IndexedDB 章节缓存。
+- `frontend/src/utils/local-cache.ts` 负责本地快照缓存。
+- `frontend/vite.config.ts` 中的 Workbox runtime caching 提供浏览器缓存兜底。
 
-- 书源导入、启停、删除。
-- 多源搜索。
-- 书籍详情、目录、正文获取。
-- 本地 TXT / EPUB 导入。
-- 书架分类、隐藏、批量操作。
-- 服务端章节缓存、批量缓存、批量导出。
-- 旧版阅读进度接口 `/api/progress`。
-- 新版同步接口 `/api/sync/progress/*` 与 `/api/sync/bookmarks/*`。
-- 离线任务接口 `/api/offline/tasks*` 与离线目录 `/api/offline/catalog`。
-- 字体列表与字体下载接口。
-- PWA 安装、Workbox runtime caching、IndexedDB 章节缓存。
+### 4. 阅读与同步层
 
-### 未落地或仅停留在旧文档里
+- 阅读页命中本地章节缓存时先本地渲染，再按需要联网刷新。
+- `frontend/src/utils/sync-queue.ts` 负责按 `user_id + book_key` 收敛的进度补传队列。
+- 搜索页通过 `fast/full` 双模式消费服务端流式搜索能力。
 
-- 统一账号 / 鉴权系统。
-- 有声书。
-- 真正异步的后台离线任务队列。
-- 服务端统一响应包装格式。
-- 搜索源健康度、结果排序、去重和短 TTL 缓存。
+### PWA 架构约束
 
-## 当前部署边界
+- 阅读体验由浏览器本地状态驱动，不把滚动锚点、菜单状态等 UI 细节回写到服务端。
+- 本地缓存是增强层，不替代服务端作为共享数据与共享状态的权威源。
+- PWA 不实现书源规则，不在客户端重做搜索排序与去重。
 
-当前部署的核心边界是：
+## 共享 API 约束
 
-- 服务端持有共享数据和可重复计算的数据。
-- 客户端持有设备态、本地缓存和阅读交互态。
+API 约束只记录多客户端共同依赖的规则，不展开阶段状态与验收结论。
 
-更具体地说：
+### 身份与版本约束
 
-| 领域 | 服务端是权威源 | 客户端是权威源 |
-| --- | --- | --- |
-| 书架主数据 | 是 | 否 |
-| 章节正文原始内容 | 是 | 否 |
-| 服务端缓存统计 | 是 | 否 |
-| 跨端共享阅读进度 | 是 | 否 |
-| 书签同步结果 | 是 | 否 |
-| 本地滚动锚点、菜单状态、阅读器布局 | 否 | 是 |
-| 浏览器 IndexedDB / Cache Storage | 否 | 是 |
-| 墨水屏刷新模式、实体按键映射 | 否 | 是 |
+- 当前没有统一账号体系。
+- `user_id` 与 `device_id` 由客户端生成并持久化。
+- 所有 `/api/*` 响应头返回：
+  - `X-Server-Version`
+  - `X-API-Contract-Version`
+  - `X-Supported-Client-Types`
+- 客户端请求应带上：
+  - `X-Client-Type`
+  - `X-Client-Version`
+  - `X-API-Contract-Version`
 
-## 当前 API 契约基线
+### 资源身份约束
 
-当前多端共享契约详见 [docs/client-server-contract.md](./client-server-contract.md)。
+- `book_key` 是当前共享资源主身份。
+- `book_url + source_url` 仅作为兼容输入存在，不应再作为长期客户端主键。
+- 书架、目录、搜索、同步、离线任务、离线目录等共享模型都应返回 `book_key`。
 
-这里只保留架构层面的结论：
+### 响应与缓存约束
 
-- API 当前直接返回 JSON 模型，不包 `code/message/data`。
-- `user_id` 和 `device_id` 由客户端自行提供与持久化。
-- `/api/sync/progress/upsert` 与 `/api/sync/progress/pull` 已经是当前多端共享进度基线。
-- `/api/offline/tasks` 当前是同步执行的“任务风格接口”，不是完整后台队列。
-- `/api/version` 现在会返回服务端版本、契约版本和支持的客户端类型。
-- 当前 API 还不是长期最佳实践，详细执行方案见 [docs/next-stage-execution-plan.md](./next-stage-execution-plan.md)。
+- API 直接返回 JSON 模型，不使用统一 `{ code, message, data }` 包装。
+- `/api/*` 默认返回 `Cache-Control: no-store`。
+- PWA 的离线能力依赖客户端缓存层，而不是浏览器默认 HTTP 缓存。
 
-## 与旧架构文档的主要偏差
+### 搜索约束
 
-这次审计确认，旧版总体架构文档有四类偏差：
+- `/api/search` 提供 `fast/full` 两种模式。
+- 搜索去重、排序、源健康度和短 TTL 缓存由服务端负责。
+- 流式模式使用 SSE 输出当前快照；客户端不应把未排序原始结果当作最终语义。
 
-1. 把未来产品范围写成了当前已落地能力，例如有声书、统一账号和完整后台任务。
-2. 把 PWA 写成了更接近“原生 App”的离线模型，但真实代码是混合在线优先。
-3. 把离线任务写成了后台队列，但当前实现实际上在请求内完成服务端缓存。
-4. 把多端身份写成统一账号，但当前真实实现仍是客户端自管 `user_id/device_id`。
+### 内容约束
 
-## 下一阶段架构重点
+- `/api/content/book-info` 与 `/api/content/chapters` 支持 `book_key` 查询。
+- `/api/content/chapter` 当前以 `url + source_url` 定位章节内容。
+- 服务端负责把正文归一为小说文本或漫画图片列表；客户端负责渲染。
 
-### P0：先把当前基线写实并锁定
+### 同步约束
 
-- 以 [docs/client-server-contract.md](./client-server-contract.md) 为准，统一服务端、PWA、墨水屏端的接口描述。
-- 保持服务端 API 对 PWA 和墨水屏端都可复用，但不强迫两个客户端采用同一种联网策略。
+- 阅读进度主键是 `user_id + book_key`。
+- 同步回包包含 `revision`、`accepted`、`conflict`、`conflict_reason`。
+- `force=true` 允许客户端显式覆盖冲突。
+- revision 是当前增量拉取游标。
 
-### P0：PWA 与墨水屏端分轨
+### 任务约束
 
-- PWA 继续保留在线优先 + 本地缓存增强。
-- 墨水屏端只保留阅读必要能力，并使用收敛后的同步/下载策略。
-
-### P0：服务端核心重构
-
-- 搜索准确度与速度优先：结果评分、去重、源健康度、缓存和快速模式。
-- 资源身份收口：引入 `book_key`，减少客户端长期依赖 `book_url + source_url`。
-- 离线任务真正任务化，为后续有声书任务复用同一任务层。
-- 同步接口幂等化：source-aware key、batch upsert、revision 生成改造。
-
-### P1：客户端阅读体验
-
-- PWA 自动翻页。
-- 墨水屏端自动翻页、实体按键映射和弱网批量补传。
-
-### P1：有声书能力
-
-- 服务端音频任务与音频缓存。
-- PWA 播放器。
-- 墨水屏端最小播放控制。
-
-### P2：补真正的多用户能力
-
-- 在后续账号系统落地前，文档和代码都不再把 `demo-user + device_id` 方案描述成“统一账号”。
-
-### 暂不做
-
-- RSS。
-- 漫画路线扩展。
-- 重型账号 / 权限系统。
+- `/api/offline/tasks` 是后台任务接口，不是同步执行接口。
+- 任务创建、任务状态、离线目录摘要是三个不同语义：
+  - 创建任务：生成或复用任务。
+  - 读取任务：看运行状态。
+  - 读取目录：看已完成缓存摘要。
 
 ## 相关文档
 
-- [docs/README.md](./README.md)
-- [docs/client-server-contract.md](./client-server-contract.md)
-- [docs/next-stage-execution-plan.md](./next-stage-execution-plan.md)
+- [docs/phase1.md](./phase1.md)
 - [e-link-client/docs/eink-client-plan.md](../e-link-client/docs/eink-client-plan.md)

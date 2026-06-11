@@ -1,6 +1,7 @@
 package com.easyreader.elinkclient
 
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,5 +33,12 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         viewModel.syncOnAppBackground()
         super.onStop()
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (viewModel.handleReaderHardwareKey(keyCode)) {
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 }

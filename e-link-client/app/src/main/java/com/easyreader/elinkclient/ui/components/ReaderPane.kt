@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,9 +40,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.easyreader.elinkclient.core.EinkDeviceRefreshBridge
 import com.easyreader.elinkclient.core.RefreshAction
 import com.easyreader.elinkclient.ui.EinkUiState
+import com.easyreader.elinkclient.ui.ReaderHardwareAction
 import com.easyreader.elinkclient.ui.ReaderFontStyle
 import java.io.File
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @Composable
 fun ReaderPane(
@@ -49,6 +52,7 @@ fun ReaderPane(
     onOpenChapter: (Int) -> Unit,
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
+    onUpdateChapterPosition: (Double) -> Unit,
     onPauseAutoTurn: (String?) -> Unit,
     onToggleAutoTurn: () -> Unit,
     onCycleReaderFont: () -> Unit,
@@ -56,6 +60,7 @@ fun ReaderPane(
     onDecreaseFontSize: () -> Unit,
     onIncreaseLineSpacing: () -> Unit,
     onDecreaseLineSpacing: () -> Unit,
+    onRequestCacheCurrentBook: () -> Unit,
     onExitReader: () -> Unit,
 ) {
     if (state.activeBookKey.isNullOrBlank()) {
@@ -81,6 +86,7 @@ fun ReaderPane(
     }
 
     val hostView = LocalView.current
+    val latestPositionCallback by rememberUpdatedState(onUpdateChapterPosition)
     var showQuickMenu by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var readerScrollView by remember { mutableStateOf<ScrollView?>(null) }
@@ -90,6 +96,7 @@ fun ReaderPane(
         state.activeSourceUrl.orEmpty(),
         state.activeChapterListIndex.toString(),
     ).joinToString("|")
+    val chapterRestoreKey = "$chapterRenderKey|${state.chapterRestoreToken}"
     var inChapterTurnCount by remember(chapterRenderKey, state.refreshEveryTurns) {
         mutableStateOf(0)
     }
@@ -115,6 +122,16 @@ fun ReaderPane(
         }
     }
     val readerTextColor = MaterialTheme.colorScheme.onBackground.toArgb()
+
+    fun calculateReadingPosition(scrollView: ScrollView, textView: TextView): Double {
+        val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
+        val contentHeight = textView.height.coerceAtLeast(0)
+        val maxScroll = (contentHeight - viewportHeight).coerceAtLeast(0)
+        if (maxScroll <= 0) {
+            return 0.0
+        }
+        return (scrollView.scrollY.coerceAtLeast(0).toDouble() / maxScroll.toDouble()).coerceIn(0.0, 1.0)
+    }
 
     fun applyInChapterRefresh() {
         inChapterTurnCount += 1
@@ -159,6 +176,7 @@ fun ReaderPane(
             }
             scrollView.scrollTo(0, targetScroll)
             applyInChapterRefresh()
+            latestPositionCallback(calculateReadingPosition(scrollView, textView))
             return
         }
 
@@ -173,6 +191,7 @@ fun ReaderPane(
         }
         scrollView.scrollTo(0, targetScroll)
         applyInChapterRefresh()
+        latestPositionCallback(calculateReadingPosition(scrollView, textView))
     }
 
     LaunchedEffect(
@@ -192,6 +211,14 @@ fun ReaderPane(
                 break
             }
             turnPage(forward = true, initiatedByAuto = true)
+        }
+    }
+
+    LaunchedEffect(state.readerCommandSignal) {
+        when (state.pendingReaderCommand) {
+            ReaderHardwareAction.PREVIOUS_PAGE -> turnPage(forward = false)
+            ReaderHardwareAction.NEXT_PAGE -> turnPage(forward = true)
+            ReaderHardwareAction.NONE -> Unit
         }
     }
 
@@ -234,66 +261,121 @@ fun ReaderPane(
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { context ->
-                        ScrollView(context).apply {
-                            readerScrollView = this
-                            isFillViewport = true
-                            overScrollMode = ScrollView.OVER_SCROLL_NEVER
-                            addView(
-                                TextView(context).apply {
-                                    includeFontPadding = false
-                                    setPadding(0, 4, 0, 16)
-                                    setTextColor(readerTextColor)
-                                },
-                                ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                                ),
+                if (!state.activeChapterCached) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = state.chapterText,
+                                style = MaterialTheme.typography.bodyMedium,
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showToc = true },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("目录")
+                                }
+                                Button(
+                                    onClick = {
+                                        onPauseAutoTurn("请求缓存已暂停自动翻页")
+                                        onRequestCacheCurrentBook()
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("更新本地缓存")
+                                }
+                            }
                         }
-                    },
-                    update = { scrollView ->
-                        readerScrollView = scrollView
-                        val textView = scrollView.getChildAt(0) as TextView
-                        textView.text = state.chapterText
-                        textView.setTextColor(readerTextColor)
-                        textView.textSize = state.readerFontSizeSp.toFloat()
-                        textView.setLineSpacing(0f, state.readerLineSpacing)
-                        textView.typeface = customTypeface ?: when (state.readerFontStyle) {
-                            ReaderFontStyle.SANS -> Typeface.SANS_SERIF
-                            ReaderFontStyle.SERIF -> Typeface.SERIF
-                        }
-                        val previousChapterKey = scrollView.tag as? String
-                        if (previousChapterKey != chapterRenderKey) {
-                            scrollView.tag = chapterRenderKey
-                            scrollView.post { scrollView.scrollTo(0, 0) }
-                        }
-                    },
-                )
+                    }
+                } else {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { context ->
+                            ScrollView(context).apply {
+                                readerScrollView = this
+                                isFillViewport = true
+                                overScrollMode = ScrollView.OVER_SCROLL_NEVER
+                                addView(
+                                    TextView(context).apply {
+                                        includeFontPadding = false
+                                        setPadding(0, 4, 0, 16)
+                                        setTextColor(readerTextColor)
+                                    },
+                                    ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                                    ),
+                                )
+                            }
+                        },
+                        update = { scrollView ->
+                            readerScrollView = scrollView
+                            val textView = scrollView.getChildAt(0) as TextView
+                            scrollView.setOnScrollChangeListener { view, _, _, _, _ ->
+                                if (state.chapterType == "novel" && state.activeChapterCached) {
+                                    val scrollingView = view as? ScrollView ?: return@setOnScrollChangeListener
+                                    val contentView = scrollingView.getChildAt(0) as? TextView ?: return@setOnScrollChangeListener
+                                    latestPositionCallback(calculateReadingPosition(scrollingView, contentView))
+                                }
+                            }
+                            textView.text = state.chapterText
+                            textView.setTextColor(readerTextColor)
+                            textView.textSize = state.readerFontSizeSp.toFloat()
+                            textView.setLineSpacing(0f, state.readerLineSpacing)
+                            textView.typeface = customTypeface ?: when (state.readerFontStyle) {
+                                ReaderFontStyle.SANS -> Typeface.SANS_SERIF
+                                ReaderFontStyle.SERIF -> Typeface.SERIF
+                            }
+                            val previousChapterKey = scrollView.tag as? String
+                            if (previousChapterKey != chapterRestoreKey) {
+                                scrollView.tag = chapterRestoreKey
+                                scrollView.post {
+                                    val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
+                                    val contentHeight = textView.height.coerceAtLeast(0)
+                                    val maxScroll = (contentHeight - viewportHeight).coerceAtLeast(0)
+                                    val targetScroll = (maxScroll * state.activeChapterPosition).roundToInt().coerceIn(0, maxScroll)
+                                    scrollView.scrollTo(0, targetScroll)
+                                    latestPositionCallback(calculateReadingPosition(scrollView, textView))
+                                }
+                            }
+                        },
+                    )
 
-                Row(modifier = Modifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(2f)
-                            .fillMaxHeight()
-                            .clickable(
-                                interactionSource = noRippleSource,
-                                indication = null,
-                                onClick = { turnPage(forward = false) },
-                            ),
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(3f)
-                            .fillMaxHeight()
-                            .clickable(
-                                interactionSource = noRippleSource,
-                                indication = null,
-                                onClick = { turnPage(forward = true) },
-                            ),
-                    )
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(2f)
+                                .fillMaxHeight()
+                                .clickable(
+                                    interactionSource = noRippleSource,
+                                    indication = null,
+                                    onClick = { turnPage(forward = false) },
+                                ),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(3f)
+                                .fillMaxHeight()
+                                .clickable(
+                                    interactionSource = noRippleSource,
+                                    indication = null,
+                                    onClick = { turnPage(forward = true) },
+                                ),
+                        )
+                    }
                 }
             }
 
