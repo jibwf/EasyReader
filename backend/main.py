@@ -5,9 +5,10 @@ import re
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.config import settings
 from backend.database import close_db, get_db
 from backend.routers import backup, books, content, explore, fonts, offline, proxy, search, sources, sync
 from backend.services.sync_manager import bootstrap_offline_task_worker, shutdown_offline_task_worker
@@ -44,10 +45,20 @@ app = FastAPI(title="EasyReader", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_api_auth(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.url.path != "/api/version":
+        if settings.api_key:
+            provided_key = request.headers.get("x-api-key", "")
+            if provided_key != settings.api_key:
+                return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    return await call_next(request)
 
 
 @app.middleware("http")

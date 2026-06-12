@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     request_timeout: int = 15
     max_concurrent_requests: int = 10
     offline_task_worker_enabled: bool = True
+    api_key: str = ""  # Empty = auth disabled (backward compatible)
+    max_upload_size_mb: int = 50
+    cors_origins: str = "*"
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -43,6 +46,16 @@ class Settings(BaseSettings):
     @property
     def font_dir(self) -> Path:
         return self.data_dir / "fonts"
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.max_upload_size_mb * 1024 * 1024
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        if self.cors_origins.strip() == "*":
+            return ["*"]
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()
