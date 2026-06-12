@@ -44,10 +44,17 @@ export function getClientRequestHeaders(init?: HeadersInit): Headers {
   headers.set("X-Client-Type", CLIENT_TYPE);
   headers.set("X-Client-Version", CLIENT_VERSION);
   headers.set("X-API-Contract-Version", API_CONTRACT_VERSION);
+
+  const token = localStorage.getItem("reader-auth-token");
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const apiKey = localStorage.getItem("reader-api-key") || "";
   if (apiKey) {
     headers.set("X-API-Key", apiKey);
   }
+
   return headers;
 }
 
