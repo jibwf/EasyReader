@@ -4,9 +4,9 @@ import { persist } from "zustand/middleware";
 export type ReaderTheme = "light" | "sepia" | "mint" | "blue" | "gray" | "night" | "dark";
 export type NormalizedReaderTheme = Exclude<ReaderTheme, "dark">;
 
-export const AUTO_PAGE_TURN_INTERVAL_MS_MIN = 3000;
-export const AUTO_PAGE_TURN_INTERVAL_MS_MAX = 20000;
-export const AUTO_PAGE_TURN_INTERVAL_MS_STEP = 100;
+export const AUTO_PAGE_TURN_INTERVAL_MS_MIN = 5000;
+export const AUTO_PAGE_TURN_INTERVAL_MS_MAX = 30000;
+export const AUTO_PAGE_TURN_INTERVAL_MS_STEP = 500;
 
 export function getDefaultAutoPageTurnIntervalMs(): number {
   if (typeof window === "undefined" || !window.matchMedia) {
@@ -14,7 +14,7 @@ export function getDefaultAutoPageTurnIntervalMs(): number {
   }
   const isMobileViewport = window.matchMedia("(max-width: 768px)").matches;
   const hasCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
-  return isMobileViewport || hasCoarsePointer ? 7500 : 10000;
+  return isMobileViewport || hasCoarsePointer ? 8000 : 15000;
 }
 
 export function clampAutoPageTurnIntervalMs(intervalMs: number): number {
