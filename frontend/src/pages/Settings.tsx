@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, BookCategoryItem, SourceItem } from "@/api/client";
+import {
+  api,
+  BackupConflictPolicy,
+  BackupRestoreMode,
+  BackupRestoreResponse,
+  BookCategoryItem,
+  SourceItem,
+} from "@/api/client";
 import { clearBrowserCache, getBrowserCacheStats } from "@/utils/chapter-cache";
 import {
   applyFontPreferences,
@@ -9,6 +16,28 @@ import {
 } from "@/utils/font-manager";
 
 const SOURCE_PAGE_SIZE = 20;
+
+function summarizeBackupRestore(result: BackupRestoreResponse): string {
+  const tableStats = Object.values(result.tables);
+  const fileStats = Object.values(result.files);
+
+  const inserted = tableStats.reduce((sum, item) => sum + item.inserted, 0);
+  const updated = tableStats.reduce((sum, item) => sum + item.updated, 0);
+  const skipped = tableStats.reduce((sum, item) => sum + item.skipped, 0);
+  const writtenFiles = fileStats.reduce((sum, item) => sum + item.written, 0);
+
+  return `恢复完成：冲突 ${result.conflicts}，新增 ${inserted}，更新 ${updated}，跳过 ${skipped}，写入文件 ${writtenFiles}。`;
+}
+
+function getConflictPolicyLabel(policy: BackupConflictPolicy): string {
+  if (policy === "backup_wins") {
+    return "备份优先";
+  }
+  if (policy === "local_wins") {
+    return "本地优先";
+  }
+  return "较新优先";
+}
 
 export default function Settings() {
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -44,6 +73,12 @@ export default function Settings() {
 
   const [fontPrefs, setFontPrefs] = useState(getFontPreferences());
   const [fontMessage, setFontMessage] = useState("");
+
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
+  const [restoreMode, setRestoreMode] = useState<BackupRestoreMode>("incremental");
+  const [conflictPolicy, setConflictPolicy] = useState<BackupConflictPolicy>("newer_wins");
+  const restoreFileRef = useRef<HTMLInputElement>(null);
 
   const fontNameMap = useMemo(
     () => new Map(FONT_OPTIONS.map((font) => [font.key, font.name])),
@@ -354,6 +389,78 @@ export default function Settings() {
     setFontMessage(`字体已切换为: ${fontName}（应用与阅读同步）`);
   };
 
+  const handleDownloadBackup = async () => {
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const { fileName, blob } = await api.downloadBackup();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+      }, 0);
+      setBackupMessage(`备份文件已下载：${fileName}`);
+    } catch {
+      setBackupMessage("备份下载失败");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleRestoreBackupFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setBackupMessage("请选择 .zip 备份文件");
+      return;
+    }
+
+    const modeLabel = restoreMode === "full" ? "全量恢复" : "增量恢复";
+    const policyLabel = getConflictPolicyLabel(conflictPolicy);
+    const confirmMessage =
+      restoreMode === "full"
+        ? `将执行${modeLabel}，当前服务器数据会被备份内容整体替换，是否继续？`
+        : `将执行${modeLabel}（冲突策略：${policyLabel}），是否继续？`;
+
+    const confirmed = window.confirm(confirmMessage);
+    if (!confirmed) {
+      return;
+    }
+
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const result = await api.restoreBackup(file, restoreMode, conflictPolicy);
+      await Promise.all([
+        loadSources(),
+        loadCategories(),
+        loadServerCacheStats(),
+      ]);
+      setBackupMessage(`${summarizeBackupRestore(result)} 建议返回书架刷新数据。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "恢复失败";
+      setBackupMessage(`恢复失败：${message}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleClickRestore = () => {
+    if (backupBusy) {
+      return;
+    }
+    restoreFileRef.current?.click();
+  };
+
   const renderSourcePager = () => {
     if (sources.length === 0 || sourcePageCount <= 1) {
       return null;
@@ -605,6 +712,92 @@ export default function Settings() {
             {browserCacheMessage && <p className="mt-2 text-[11px] text-[#86868b]">{browserCacheMessage}</p>}
           </div>
         </div>
+      </section>
+
+      <section className="mb-4 p-3 rounded-xl bg-black/[0.03] border border-black/[0.05]">
+        <h2 className="text-[12px] font-semibold text-[#1d1d1f] mb-1">数据备份与恢复</h2>
+        <p className="text-[11px] text-[#86868b] mb-3">
+          备份会下载一个 ZIP 文件；恢复支持全量回到备份点，或增量合并并按冲突策略处理。
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="p-2.5 rounded-lg bg-white border border-black/[0.08]">
+            <h3 className="text-[12px] font-semibold text-[#1d1d1f] mb-2">下载备份</h3>
+            <p className="text-[11px] text-[#86868b]">点击后浏览器会下载当前服务器数据快照。</p>
+            <button
+              onClick={handleDownloadBackup}
+              disabled={backupBusy}
+              className="mt-2 px-2.5 py-1.5 rounded bg-black/[0.06] text-[11px] text-[#1d1d1f] disabled:opacity-40"
+            >
+              点击备份并下载
+            </button>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-white border border-black/[0.08]">
+            <h3 className="text-[12px] font-semibold text-[#1d1d1f] mb-2">上传恢复</h3>
+
+            <div className="space-y-2 text-[11px] text-[#86868b]">
+              <div>
+                <p className="text-[#1d1d1f] mb-1">恢复模式</p>
+                <label className="mr-3 inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="restore-mode"
+                    value="incremental"
+                    checked={restoreMode === "incremental"}
+                    onChange={() => setRestoreMode("incremental")}
+                    disabled={backupBusy}
+                  />
+                  增量恢复
+                </label>
+                <label className="inline-flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name="restore-mode"
+                    value="full"
+                    checked={restoreMode === "full"}
+                    onChange={() => setRestoreMode("full")}
+                    disabled={backupBusy}
+                  />
+                  全量恢复到备份点
+                </label>
+              </div>
+
+              <div>
+                <p className="text-[#1d1d1f] mb-1">冲突策略（增量恢复时生效）</p>
+                <select
+                  value={conflictPolicy}
+                  onChange={(event) => setConflictPolicy(event.target.value as BackupConflictPolicy)}
+                  disabled={backupBusy || restoreMode === "full"}
+                  className="w-full px-2 py-1 rounded bg-black/[0.04] text-[#1d1d1f]"
+                >
+                  <option value="backup_wins">备份优先（冲突时用备份覆盖本地）</option>
+                  <option value="local_wins">本地优先（冲突时保留本地）</option>
+                  <option value="newer_wins">较新优先（按更新时间/版本决策）</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              onClick={handleClickRestore}
+              disabled={backupBusy}
+              className="mt-2 px-2.5 py-1.5 rounded bg-black/[0.06] text-[11px] text-[#1d1d1f] disabled:opacity-40"
+            >
+              点击恢复并上传文件
+            </button>
+
+            <input
+              ref={restoreFileRef}
+              type="file"
+              accept=".zip,application/zip"
+              className="hidden"
+              onChange={handleRestoreBackupFile}
+              disabled={backupBusy}
+            />
+          </div>
+        </div>
+
+        {backupMessage && <p className="mt-2 text-[12px] text-[#86868b]">{backupMessage}</p>}
       </section>
 
       <section className="mb-4 p-3 rounded-xl bg-black/[0.03] border border-black/[0.05]">

@@ -48,6 +48,7 @@ E-link Android     ->  FastAPI  -> data/cache
 - `book_key` 维度的进度同步与书签同步。
 - SQLite-backed 离线任务层、任务轮询与离线目录汇总。
 - 统一字体分发与下载接口。
+- 服务端快照备份下载与上传恢复接口（全量/增量 + 冲突策略）。
 
 ### Web PWA 已完成
 
@@ -56,6 +57,7 @@ E-link Android     ->  FastAPI  -> data/cache
 - 搜索 `fast/full` 双模式与流式结果消费。
 - 自动翻页。
 - 进度冲突提示与 `book_key` 去重补传队列。
+- 设置页支持备份下载与上传恢复，并可选择恢复模式和冲突策略。
 
 ### 墨水屏客户端当前已完成
 

@@ -53,6 +53,7 @@ EasyReader 当前由三部分组成：
 - 离线目录：`POST /api/offline/tasks`、`GET /api/offline/catalog`。
 - 服务端字体清单与字体下载接口，供客户端复用。
 - API 版本与客户端契约头，便于 Web PWA 和墨水屏客户端对齐能力边界。
+- 服务端备份下载与恢复上传，支持全量恢复或增量恢复冲突处理。
 
 ## 架构概览
 
@@ -191,6 +192,8 @@ docker run --rm -p 8080:8080 -v $(pwd)/data:/app/data easyreader
 - `POST /api/offline/tasks` / `GET /api/offline/tasks` / `GET /api/offline/catalog`：离线任务与离线目录。
 - `GET /api/fonts`：获取服务器字体列表。
 - `GET /api/fonts/{font_file_name}/download`：下载服务器字体文件。
+- `GET /api/backup/export`：下载服务端备份 ZIP。
+- `POST /api/backup/restore`：上传备份 ZIP 并执行全量/增量恢复。
 
 ## 当前状态
 

@@ -17,6 +17,28 @@ function buildHeaders(options?: RequestInit): Headers {
   return headers;
 }
 
+function parseDownloadFileName(disposition: string | null, fallback: string): string {
+  if (!disposition) {
+    return fallback;
+  }
+
+  const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+
+  const plainMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1];
+  }
+
+  return fallback;
+}
+
 export function getClientRequestHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init ?? {});
   headers.set("X-Client-Type", CLIENT_TYPE);
@@ -256,6 +278,38 @@ export interface OfflineCatalogItem {
   total_chapters: number;
   cached_chapters: number;
   updated_at: string;
+}
+
+export type BackupRestoreMode = "full" | "incremental";
+export type BackupConflictPolicy = "backup_wins" | "local_wins" | "newer_wins";
+
+export interface BackupTableRestoreSummary {
+  incoming: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  conflicts: number;
+  resolved_with_backup: number;
+  resolved_with_local: number;
+}
+
+export interface BackupFileRestoreSummary {
+  incoming: number;
+  written: number;
+  skipped: number;
+  conflicts: number;
+  resolved_with_backup: number;
+  resolved_with_local: number;
+}
+
+export interface BackupRestoreResponse {
+  ok: boolean;
+  format_version: string;
+  mode: BackupRestoreMode;
+  conflict_policy: BackupConflictPolicy;
+  conflicts: number;
+  tables: Record<string, BackupTableRestoreSummary>;
+  files: Record<string, BackupFileRestoreSummary>;
 }
 
 function dedupeLatestSyncProgress(items: SyncProgressItem[]): SyncProgressItem[] {
@@ -507,6 +561,52 @@ export const api = {
     request<OfflineCatalogItem[]>(
       `/offline/catalog?user_id=${encodeURIComponent(userId)}&device_id=${encodeURIComponent(deviceId)}`
     ),
+
+  downloadBackup: async () => {
+    const res = await fetch(`${BASE}/backup/export`, {
+      method: "GET",
+      headers: buildHeaders(),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`API error: ${res.status}`);
+    }
+
+    const fileName = parseDownloadFileName(res.headers.get("content-disposition"), "easyreader-backup.zip");
+    const blob = await res.blob();
+    return { fileName, blob };
+  },
+
+  restoreBackup: async (file: File, mode: BackupRestoreMode, conflictPolicy: BackupConflictPolicy) => {
+    const form = new FormData();
+    form.append("file", file);
+
+    const params = new URLSearchParams();
+    params.set("mode", mode);
+    params.set("conflict_policy", conflictPolicy);
+
+    const res = await fetch(`${BASE}/backup/restore?${params.toString()}`, {
+      method: "POST",
+      headers: buildHeaders({ body: form }),
+      body: form,
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      let detail = "Backup restore failed";
+      try {
+        const payload = (await res.json()) as { detail?: string };
+        if (payload?.detail) {
+          detail = payload.detail;
+        }
+      } catch {
+        // Keep fallback detail.
+      }
+      throw new Error(detail);
+    }
+
+    return (await res.json()) as BackupRestoreResponse;
+  },
 };
 
 export type ChapterContent =

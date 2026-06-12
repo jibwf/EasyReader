@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import close_db, get_db
-from backend.routers import sources, search, content, books, explore, proxy, sync, offline, fonts
+from backend.routers import backup, books, content, explore, fonts, offline, proxy, search, sources, sync
 from backend.services.sync_manager import bootstrap_offline_task_worker, shutdown_offline_task_worker
 
 VERSION_PATTERN = re.compile(r"^\d{8}\d+$")
@@ -71,6 +71,7 @@ app.include_router(proxy.router)
 app.include_router(sync.router)
 app.include_router(offline.router)
 app.include_router(fonts.router)
+app.include_router(backup.router)
 
 @app.get("/api/version")
 async def get_version():
