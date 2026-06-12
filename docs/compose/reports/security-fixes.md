@@ -16,7 +16,7 @@ Four critical/high-severity security issues identified in the project audit were
 
 1. **API Key Authentication**: Optional API key authentication protects all `/api/*` endpoints (except `/api/version`). When `READER_API_KEY` env var is set, requests must include `X-API-Key` header. Empty key disables auth for backward compatibility.
 
-2. **File Upload Size Limits**: All file upload endpoints (`/api/books/import`, `/api/backup/restore`) now enforce a configurable size limit (default 50MB, set via `READER_MAX_UPLOAD_SIZE_MB`). Source import lists are capped at 1000 items. Returns HTTP 413 with clear error message when exceeded.
+2. **File Upload Size Limits**: All file upload endpoints (`/api/books/import`, `/api/backup/restore`) now enforce a configurable size limit (default 200MB, set via `READER_MAX_UPLOAD_SIZE_MB`). Source import lists are capped at 3000 items. Returns HTTP 413 with clear error message when exceeded.
 
 3. **CORS Restriction**: CORS origins are now configurable via `READER_CORS_ORIGINS` env var (comma-separated list). Default remains `*` for backward compatibility. Set to specific origins for production deployments.
 
@@ -43,8 +43,8 @@ Upload file → validate_upload_size() → Read content → Check size → Pass 
 ```
 
 - `backend/utils/upload_guard.py` provides reusable validation
-- Config via `READER_MAX_UPLOAD_SIZE_MB` (default 50)
-- List validation via `validate_list_length()` (max 1000 items)
+- Config via `READER_MAX_UPLOAD_SIZE_MB` (default 200)
+- List validation via `validate_list_length()` (max 3000 items)
 
 ### CORS Configuration
 
@@ -89,8 +89,8 @@ localStorage.setItem("reader-api-key", "your-secret-key")
 ### Configure Upload Limits
 
 ```bash
-# Default 50MB, change as needed
-export READER_MAX_UPLOAD_SIZE_MB=100
+# Default 200MB, change as needed
+export READER_MAX_UPLOAD_SIZE_MB=500
 ```
 
 ### Restrict CORS
@@ -105,7 +105,7 @@ export READER_CORS_ORIGINS="http://localhost:5173,https://myapp.example.com"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `READER_API_KEY` | `""` | API key for authentication (empty = disabled) |
-| `READER_MAX_UPLOAD_SIZE_MB` | `50` | Max file upload size in MB |
+| `READER_MAX_UPLOAD_SIZE_MB` | `200` | Max file upload size in MB |
 | `READER_CORS_ORIGINS` | `"*"` | Comma-separated allowed origins |
 
 ## Verification

@@ -37,7 +37,7 @@ async def test_books_import_accepts_valid_file(monkeypatch):
 async def test_sources_import_rejects_long_list():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        sources = [{"book_source_url": f"http://example.com/{i}"} for i in range(1001)]
+        sources = [{"book_source_url": f"http://example.com/{i}"} for i in range(3001)]
         resp = await client.post("/api/sources/import", json=sources)
         assert resp.status_code == 413
         assert "List too large" in resp.json()["detail"]
@@ -47,6 +47,6 @@ async def test_sources_import_rejects_long_list():
 async def test_sources_import_accepts_valid_list():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        sources = [{"book_source_url": f"http://example.com/{i}"} for i in range(100)]
+        sources = [{"book_source_url": f"http://example.com/{i}"} for i in range(3000)]
         resp = await client.post("/api/sources/import", json=sources)
         assert resp.status_code == 200

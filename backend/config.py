@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     max_concurrent_requests: int = 10
     offline_task_worker_enabled: bool = True
     api_key: str = ""  # Empty = auth disabled (backward compatible)
-    max_upload_size_mb: int = 50
+    max_upload_size_mb: int = 200
     cors_origins: str = "*"
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

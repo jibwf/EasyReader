@@ -134,6 +134,25 @@ npm run dev
 - 后端：`http://127.0.0.1:8080`
 - 前端：`http://127.0.0.1:5173`
 
+## 环境变量配置
+
+所有配置项均通过 `READER_` 前缀的环境变量设置，也可通过 `.env` 文件配置：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `READER_DATA_DIR` | `data` | 数据存储目录 |
+| `READER_DB_PATH` | `{DATA_DIR}/reader.db` | SQLite 数据库路径 |
+| `READER_CACHE_DIR` | `{DATA_DIR}/cache` | 缓存目录 |
+| `READER_LOG_LEVEL` | `INFO` | 日志级别 |
+| `READER_PROXY` | `None` | HTTP 代理地址 |
+| `READER_REQUEST_TIMEOUT` | `15` | 请求超时时间（秒） |
+| `READER_MAX_CONCURRENT_REQUESTS` | `10` | 最大并发请求数 |
+| `READER_OFFLINE_TASK_WORKER_ENABLED` | `True` | 是否启用离线任务 Worker |
+| `READER_API_KEY` | `""` | API 认证密钥（空=禁用认证） |
+| `READER_MAX_UPLOAD_SIZE_MB` | `200` | 最大上传文件大小（MB） |
+| `READER_CORS_ORIGINS` | `"*"` | 允许的 CORS 来源（逗号分隔） |
+| `READER_USER_AGENT` | Chrome 120 UA | 请求 User-Agent |
+
 ## 测试与构建
 
 后端测试：

@@ -19,7 +19,7 @@ async def validate_upload_size(file: UploadFile, max_bytes: int | None = None):
     return content
 
 
-def validate_list_length(items: list, max_items: int = 1000):
+def validate_list_length(items: list, max_items: int = 3000):
     """Validate list length to prevent memory exhaustion."""
     if len(items) > max_items:
         raise HTTPException(
