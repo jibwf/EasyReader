@@ -15,21 +15,45 @@ import com.easyreader.elinkclient.data.model.ServerCacheStats
 import com.easyreader.elinkclient.data.model.ServerFontItem
 import com.easyreader.elinkclient.data.model.SyncProgressItem
 import com.easyreader.elinkclient.data.model.SyncProgressUpsertRequest
+import java.util.Locale
 
 enum class ReaderFontStyle {
     SANS,
     SERIF,
 }
 
-enum class AutoPageTurnSpeed(val label: String, val intervalMs: Long) {
-    SLOW("慢", 7600L),
-    MEDIUM("中", 5200L),
-    FAST("快", 3200L);
+object AutoPageTurnSpeedConfig {
+    const val MIN_INTERVAL_MS = 8_000L
+    const val MAX_INTERVAL_MS = 30_000L
+    const val STEP_INTERVAL_MS = 500L
+    const val DEFAULT_INTERVAL_MS = 15_600L
 
-    companion object {
-        fun fromStorage(raw: String?): AutoPageTurnSpeed {
-            return entries.firstOrNull { it.name == raw } ?: MEDIUM
+    fun normalize(intervalMs: Long): Long {
+        return intervalMs.coerceIn(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
+    }
+
+    fun fromStorage(raw: String?): Long {
+        val normalizedRaw = raw?.trim().orEmpty()
+        val legacyValue = when (normalizedRaw.uppercase()) {
+            "SLOW" -> 10_000L
+            "MEDIUM" -> DEFAULT_INTERVAL_MS
+            "FAST" -> 5_200L
+            else -> null
         }
+        if (legacyValue != null) {
+            return normalize(legacyValue)
+        }
+        val parsed = normalizedRaw.toLongOrNull() ?: return DEFAULT_INTERVAL_MS
+        return normalize(parsed)
+    }
+
+    fun toStorage(intervalMs: Long): String {
+        return normalize(intervalMs).toString()
+    }
+
+    fun formatLabel(intervalMs: Long): String {
+        val seconds = normalize(intervalMs) / 1000.0
+        return String.format(Locale.CHINA, "%.1f 秒/页", seconds)
     }
 }
 
@@ -122,10 +146,10 @@ data class EinkUiState(
     val readerFontKey: String = "builtin:serif",
     val readerFontPath: String? = null,
     val readerFonts: List<ReaderFontOption> = emptyList(),
-    val readerFontSizeSp: Int = 24,
-    val readerLineSpacing: Float = 1.85f,
+    val readerFontSizeSp: Int = 30,
+    val readerLineSpacing: Float = 1.2f,
     val autoPageTurnEnabled: Boolean = false,
-    val autoPageTurnSpeed: AutoPageTurnSpeed = AutoPageTurnSpeed.MEDIUM,
+    val autoPageTurnIntervalMs: Long = AutoPageTurnSpeedConfig.DEFAULT_INTERVAL_MS,
     val activeOfflineTask: ActiveOfflineTaskState? = null,
     val activeLocalCache: ActiveLocalCacheState? = null,
     val pendingSyncCount: Int = 0,

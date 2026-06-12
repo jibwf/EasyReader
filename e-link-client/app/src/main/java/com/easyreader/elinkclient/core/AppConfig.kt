@@ -14,6 +14,12 @@ object AppConfig {
     const val KEY_READER_FONT_SIZE = "reader_font_size"
     const val KEY_READER_LINE_SPACING = "reader_line_spacing"
     const val KEY_READER_AUTO_TURN_SPEED = "reader_auto_turn_speed"
+    const val KEY_LAST_ACTIVE_BOOK_KEY = "last_active_book_key"
+    const val KEY_LAST_ACTIVE_BOOK_NAME = "last_active_book_name"
+    const val KEY_LAST_ACTIVE_BOOK_URL = "last_active_book_url"
+    const val KEY_LAST_ACTIVE_SOURCE_URL = "last_active_source_url"
+    const val KEY_LAST_ACTIVE_CHAPTER_NUMBER = "last_active_chapter_number"
+    const val KEY_LAST_ACTIVE_POSITION = "last_active_position"
     const val KEY_PENDING_PROGRESS_QUEUE = "pending_progress_queue"
     const val KEY_SYNC_POLICY = "sync_policy"
 }

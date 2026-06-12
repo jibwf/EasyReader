@@ -3,8 +3,8 @@ package com.easyreader.elinkclient.data.repository
 import android.content.Context
 import com.easyreader.elinkclient.core.AppConfig
 import com.easyreader.elinkclient.core.BookIdentity
-import com.easyreader.elinkclient.data.local.LocalCacheStore
 import com.easyreader.elinkclient.core.NetworkGate
+import com.easyreader.elinkclient.data.local.LocalCacheStore
 import com.easyreader.elinkclient.data.model.BookCreateRequest
 import com.easyreader.elinkclient.data.model.BookCategoryAssignRequest
 import com.easyreader.elinkclient.data.model.BookCategoryItem
@@ -40,6 +40,7 @@ import java.io.IOException
 import java.io.File
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlin.LazyThreadSafetyMode
 
 class ReaderRepository(
     context: Context,
@@ -47,23 +48,33 @@ class ReaderRepository(
     private val networkGate: NetworkGate = NetworkGate(context.applicationContext),
 ) {
     private val appContext = context.applicationContext
-    private val httpClient: OkHttpClient = NetworkModule.createHttpClient(appContext, networkGate)
+    private val httpClient: OkHttpClient =
+        NetworkModule.createHttpClient(appContext, networkGate)
     private val moshi = NetworkModule.createMoshi()
-    private val localStore = LocalCacheStore(appContext, moshi)
-    private val localFontDir = File(appContext.filesDir, "eink-local-store/fonts")
+    private val localStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        LocalCacheStore(appContext, moshi)
+    }
+    private val localFontDir by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        File(appContext.filesDir, "eink-local-store/fonts")
+    }
 
-    private val searchResultListType = Types.newParameterizedType(List::class.java, SearchResultItem::class.java)
-    private val searchResultListAdapter = moshi.adapter<List<SearchResultItem>>(searchResultListType)
+    private val searchResultListType by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Types.newParameterizedType(List::class.java, SearchResultItem::class.java)
+    }
+    private val searchResultListAdapter by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        moshi.adapter<List<SearchResultItem>>(searchResultListType)
+    }
 
     @Volatile
     private var normalizedBaseUrl: String = normalizeBaseUrl(initialBaseUrl)
 
     @Volatile
-    private var api: EasyReaderApi = NetworkModule.createApi(
-        baseUrl = normalizedBaseUrl,
-        client = httpClient,
-        moshi = moshi,
-    )
+    private var api: EasyReaderApi =
+        NetworkModule.createApi(
+            baseUrl = normalizedBaseUrl,
+            client = httpClient,
+            moshi = moshi,
+        )
 
     fun updateBaseUrl(baseUrl: String) {
         val normalized = normalizeBaseUrl(baseUrl)
@@ -84,7 +95,6 @@ class ReaderRepository(
 
     fun cancelNetworkRequests() {
         httpClient.dispatcher.cancelAll()
-        httpClient.connectionPool.evictAll()
     }
 
     suspend fun searchBooks(keyword: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
@@ -348,7 +358,9 @@ class ReaderRepository(
     }
 
     suspend fun getLocalBookshelf(): List<LocalShelfBook> {
-        return localStore.listBookshelf()
+        return withContext(Dispatchers.IO) {
+            localStore.listBookshelf()
+        }
     }
 
     suspend fun ensureLocalShelfBook(searchResult: SearchResultItem): LocalShelfBook {

@@ -20,9 +20,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
@@ -87,7 +89,7 @@ fun MainScreen(viewModel: EinkViewModel) {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = if (showReader) Color.White else MaterialTheme.colorScheme.background,
         topBar = {
             if (!showReader) {
                 Surface(
@@ -175,9 +177,9 @@ fun MainScreen(viewModel: EinkViewModel) {
                     onPrevChapter = viewModel::prevChapter,
                     onNextChapter = viewModel::nextChapter,
                     onUpdateChapterPosition = viewModel::updateActiveChapterPosition,
-                    onPauseAutoTurn = viewModel::pauseAutoPageTurn,
                     onToggleAutoTurn = viewModel::toggleAutoPageTurn,
-                    onSetAutoTurnSpeed = viewModel::setAutoPageTurnSpeed,
+                    onIncreaseAutoTurnSpeed = viewModel::increaseAutoPageTurnSpeed,
+                    onDecreaseAutoTurnSpeed = viewModel::decreaseAutoPageTurnSpeed,
                     onCycleReaderFont = viewModel::cycleReaderFontStyle,
                     onIncreaseFontSize = viewModel::increaseReaderFontSize,
                     onDecreaseFontSize = viewModel::decreaseReaderFontSize,
@@ -260,7 +262,7 @@ fun MainScreen(viewModel: EinkViewModel) {
                         HomePane(
                             state = state,
                             onContinueReading = {
-                                if (!state.activeBookKey.isNullOrBlank()) {
+                                if (viewModel.continueReadingFromSession()) {
                                     showReader = true
                                 } else {
                                     currentTabName = ScreenTab.Bookshelf.name

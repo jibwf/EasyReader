@@ -18,6 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
+import kotlin.LazyThreadSafetyMode
 
 class LocalCacheStore(
     context: Context,
@@ -27,10 +28,18 @@ class LocalCacheStore(
     private val rootDir = File(context.filesDir, "eink-local-store")
     private val bookshelfFile = File(rootDir, "bookshelf.json")
 
-    private val bookshelfType = Types.newParameterizedType(List::class.java, LocalShelfBook::class.java)
-    private val bookshelfAdapter = moshi.adapter<List<LocalShelfBook>>(bookshelfType)
-    private val metaAdapter = moshi.adapter(CachedBookMeta::class.java)
-    private val chapterAdapter = moshi.adapter(CachedChapterPayload::class.java)
+    private val bookshelfType by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Types.newParameterizedType(List::class.java, LocalShelfBook::class.java)
+    }
+    private val bookshelfAdapter by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        moshi.adapter<List<LocalShelfBook>>(bookshelfType)
+    }
+    private val metaAdapter by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        moshi.adapter(CachedBookMeta::class.java)
+    }
+    private val chapterAdapter by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        moshi.adapter(CachedChapterPayload::class.java)
+    }
 
     suspend fun listBookshelf(): List<LocalShelfBook> = withContext(Dispatchers.IO) {
         mutex.withLock {
@@ -415,9 +424,10 @@ class LocalCacheStore(
         if (!bookshelfFile.exists()) {
             return emptyList()
         }
+
         val raw = bookshelfFile.readText(Charsets.UTF_8)
         val parsed = runCatching { bookshelfAdapter.fromJson(raw).orEmpty() }.getOrDefault(emptyList())
-        return parsed.map { book ->
+        val normalized = parsed.map { book ->
             val resolvedBookKey = BookIdentity.resolveBookKey(book.bookKey, book.sourceUrl, book.bookUrl)
             book.copy(
                 bookKey = resolvedBookKey,
@@ -425,6 +435,8 @@ class LocalCacheStore(
                 lastReadPosition = normalizeProgress(book.lastReadPosition),
             )
         }
+
+        return normalized
     }
 
     private fun writeBookshelfLocked(books: List<LocalShelfBook>) {

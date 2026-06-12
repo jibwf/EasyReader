@@ -60,19 +60,16 @@ fun HomePane(
                             Text("前往书架")
                         }
                     } else {
+                        val bookKey = state.activeBookKey.orEmpty()
+                        val chapterNumber = (state.readingChapterByBook[bookKey] ?: (state.activeChapterListIndex + 1)).coerceAtLeast(1)
+                        val position = (state.readingPositionByBook[bookKey] ?: state.activeChapterPosition)
+                            .coerceIn(0.0, 1.0)
                         Text(
                             text = state.activeBookName.ifBlank { "未命名书籍" },
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            text = buildString {
-                                append(state.activeChapterTitle.ifBlank { "章节加载中" })
-                                append("  ·  第 ")
-                                append(state.activeChapterListIndex + 1)
-                                append("/")
-                                append(state.chapters.size.coerceAtLeast(1))
-                                append(" 章")
-                            },
+                            text = "上次阅读 第 $chapterNumber 章 · ${(position * 100).toInt()}%",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         EinkButton(onClick = onContinueReading) {

@@ -67,7 +67,6 @@ object NetworkModule {
             .client(client)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
-
         return retrofit.create(EasyReaderApi::class.java)
     }
 

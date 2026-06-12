@@ -1,5 +1,6 @@
 package com.easyreader.elinkclient.ui.components
 
+import android.graphics.Color as AndroidColor
 import android.graphics.Typeface
 import android.view.ViewGroup
 import android.widget.ScrollView
@@ -22,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,13 +32,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.easyreader.elinkclient.core.EinkDeviceRefreshBridge
 import com.easyreader.elinkclient.core.RefreshAction
-import com.easyreader.elinkclient.ui.AutoPageTurnSpeed
+import com.easyreader.elinkclient.ui.AutoPageTurnSpeedConfig
 import com.easyreader.elinkclient.ui.EinkUiState
 import com.easyreader.elinkclient.ui.ReaderHardwareAction
 import com.easyreader.elinkclient.ui.ReaderFontStyle
@@ -51,9 +54,9 @@ fun ReaderPane(
     onPrevChapter: () -> Unit,
     onNextChapter: () -> Unit,
     onUpdateChapterPosition: (Double) -> Unit,
-    onPauseAutoTurn: (String?) -> Unit,
     onToggleAutoTurn: () -> Unit,
-    onSetAutoTurnSpeed: (AutoPageTurnSpeed) -> Unit,
+    onIncreaseAutoTurnSpeed: () -> Unit,
+    onDecreaseAutoTurnSpeed: () -> Unit,
     onCycleReaderFont: () -> Unit,
     onIncreaseFontSize: () -> Unit,
     onDecreaseFontSize: () -> Unit,
@@ -98,6 +101,21 @@ fun ReaderPane(
     val chapterRestoreKey = "$chapterRenderKey|${state.chapterRestoreToken}"
     var inChapterTurnCount by remember(chapterRenderKey, state.refreshEveryTurns) {
         mutableStateOf(0)
+    }
+
+    var previousKeepScreenOn by remember(hostView) { mutableStateOf(hostView.keepScreenOn) }
+
+    DisposableEffect(hostView, state.autoPageTurnEnabled) {
+        if (state.autoPageTurnEnabled) {
+            previousKeepScreenOn = hostView.keepScreenOn
+            hostView.keepScreenOn = true
+        } else {
+            hostView.keepScreenOn = previousKeepScreenOn
+        }
+
+        onDispose {
+            hostView.keepScreenOn = previousKeepScreenOn
+        }
     }
 
     LaunchedEffect(state.refreshSignal) {
@@ -147,10 +165,7 @@ fun ReaderPane(
         EinkDeviceRefreshBridge.apply(hostView, refreshAction)
     }
 
-    fun turnPage(forward: Boolean, initiatedByAuto: Boolean = false) {
-        if (!initiatedByAuto && state.autoPageTurnEnabled) {
-            onPauseAutoTurn("手动翻页已暂停自动模式")
-        }
+    fun turnPage(forward: Boolean) {
         val scrollView = readerScrollView ?: return
         val textView = scrollView.getChildAt(0) as? TextView ?: return
         val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
@@ -164,17 +179,11 @@ fun ReaderPane(
 
         if (forward) {
             if (!scrollView.canScrollVertically(1) || currentScroll >= maxScroll) {
-                if (initiatedByAuto) {
-                    onPauseAutoTurn("自动翻页到章节末尾，已暂停")
-                }
                 onNextChapter()
                 return
             }
             val targetScroll = (currentScroll + viewportHeight).coerceAtMost(maxScroll)
             if (targetScroll == currentScroll) {
-                if (initiatedByAuto) {
-                    onPauseAutoTurn("自动翻页到章节末尾，已暂停")
-                }
                 onNextChapter()
                 return
             }
@@ -199,29 +208,33 @@ fun ReaderPane(
     }
 
     fun openQuickMenuFromTouch() {
-        if (state.autoPageTurnEnabled) {
-            onPauseAutoTurn("打开菜单已暂停自动翻页")
-        }
         showQuickMenu = true
     }
 
     LaunchedEffect(
         state.autoPageTurnEnabled,
-        state.autoPageTurnSpeed,
+        state.autoPageTurnIntervalMs,
         state.chapterType,
+        state.activeChapterCached,
         state.activeChapterListIndex,
         state.chapterText,
+        state.isLoading,
     ) {
-        if (!state.autoPageTurnEnabled || state.chapterType != "novel") {
+        if (
+            !state.autoPageTurnEnabled ||
+            state.chapterType != "novel" ||
+            !state.activeChapterCached ||
+            state.isLoading
+        ) {
             return@LaunchedEffect
         }
 
         while (state.autoPageTurnEnabled) {
-            delay(state.autoPageTurnSpeed.intervalMs)
+            delay(state.autoPageTurnIntervalMs)
             if (!state.autoPageTurnEnabled) {
                 break
             }
-            turnPage(forward = true, initiatedByAuto = true)
+            turnPage(forward = true)
         }
     }
 
@@ -236,7 +249,7 @@ fun ReaderPane(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(Color.White)
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -273,7 +286,6 @@ fun ReaderPane(
                                 }
                                 EinkButton(
                                     onClick = {
-                                        onPauseAutoTurn("请求缓存已暂停自动翻页")
                                         onRequestCacheCurrentBook()
                                     },
                                     modifier = Modifier.weight(1f),
@@ -291,11 +303,13 @@ fun ReaderPane(
                                 readerScrollView = this
                                 isFillViewport = true
                                 overScrollMode = ScrollView.OVER_SCROLL_NEVER
+                                setBackgroundColor(AndroidColor.WHITE)
                                 addView(
                                     TextView(context).apply {
                                         includeFontPadding = false
                                         setPadding(0, 4, 0, 16)
                                         setTextColor(readerTextColor)
+                                        setBackgroundColor(AndroidColor.WHITE)
                                     },
                                     ViewGroup.LayoutParams(
                                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -307,6 +321,7 @@ fun ReaderPane(
                         update = { scrollView ->
                             readerScrollView = scrollView
                             val textView = scrollView.getChildAt(0) as TextView
+                            scrollView.setBackgroundColor(AndroidColor.WHITE)
                             scrollView.setOnScrollChangeListener { view, _, _, _, _ ->
                                 if (state.chapterType == "novel" && state.activeChapterCached) {
                                     val scrollingView = view as? ScrollView ?: return@setOnScrollChangeListener
@@ -315,6 +330,7 @@ fun ReaderPane(
                                 }
                             }
                             textView.text = state.chapterText
+                            textView.setBackgroundColor(AndroidColor.WHITE)
                             textView.setTextColor(readerTextColor)
                             textView.textSize = state.readerFontSizeSp.toFloat()
                             textView.setLineSpacing(0f, state.readerLineSpacing)
@@ -420,7 +436,6 @@ fun ReaderPane(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                onPauseAutoTurn("打开目录已暂停自动翻页")
                                 showQuickMenu = false
                                 showToc = true
                             },
@@ -470,23 +485,28 @@ fun ReaderPane(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AutoPageTurnSpeed.entries.forEach { speed ->
-                            val selected = speed == state.autoPageTurnSpeed
-                            if (selected) {
-                                EinkButton(
-                                    onClick = { onSetAutoTurnSpeed(speed) },
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("速度 ${speed.label}")
-                                }
-                            } else {
-                                OutlinedButton(
-                                    onClick = { onSetAutoTurnSpeed(speed) },
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text("速度 ${speed.label}")
-                                }
-                            }
+                        OutlinedButton(
+                            onClick = {
+                                onDecreaseAutoTurnSpeed()
+                            },
+                            enabled = state.autoPageTurnIntervalMs < AutoPageTurnSpeedConfig.MAX_INTERVAL_MS,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("减速")
+                        }
+                        Text(
+                            text = AutoPageTurnSpeedConfig.formatLabel(state.autoPageTurnIntervalMs),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                onIncreaseAutoTurnSpeed()
+                            },
+                            enabled = state.autoPageTurnIntervalMs > AutoPageTurnSpeedConfig.MIN_INTERVAL_MS,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("加速")
                         }
                     }
 
@@ -595,7 +615,6 @@ fun ReaderPane(
                             } else {
                                 OutlinedButton(
                                     onClick = {
-                                        onPauseAutoTurn("目录跳转已暂停自动翻页")
                                         onOpenChapter(index)
                                         showToc = false
                                     },
