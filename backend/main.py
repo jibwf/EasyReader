@@ -59,12 +59,29 @@ app.add_middleware(
 
 @app.middleware("http")
 async def enforce_api_auth(request: Request, call_next):
-    if request.url.path.startswith("/api/") and request.url.path != "/api/version":
-        if settings.api_key:
-            provided_key = request.headers.get("x-api-key", "")
-            if provided_key != settings.api_key:
-                return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
-    return await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    public_paths = ["/api/version", "/api/auth/login", "/api/auth/verify"]
+    if request.url.path in public_paths:
+        return await call_next(request)
+
+    if not settings.api_key and not settings.password:
+        return await call_next(request)
+
+    if settings.api_key:
+        provided_key = request.headers.get("x-api-key", "")
+        if provided_key == settings.api_key:
+            return await call_next(request)
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        from backend.services.auth import verify_token
+        if await verify_token(token):
+            return await call_next(request)
+
+    return JSONResponse(status_code=401, content={"detail": "Invalid or missing authentication"})
 
 
 @app.middleware("http")
