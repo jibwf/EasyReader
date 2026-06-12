@@ -66,6 +66,7 @@ async def enforce_api_auth(request: Request, call_next):
     if request.url.path in public_paths:
         return await call_next(request)
 
+    from backend.config import settings
     if not settings.api_key and not settings.password:
         return await call_next(request)
 

@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.config import settings
-from backend.services.auth import hash_password, verify_password, create_token, verify_token
+
+def _get_settings():
+    from backend.config import settings
+    return settings
+
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -23,9 +26,11 @@ class VerifyResponse(BaseModel):
 
 @router.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
+    settings = _get_settings()
     if not settings.password:
         raise HTTPException(status_code=400, detail="Authentication not configured")
 
+    from backend.services.auth import hash_password, verify_password, create_token
     if not verify_password(req.password, hash_password(settings.password)):
         raise HTTPException(status_code=401, detail="Invalid password")
 
@@ -35,5 +40,6 @@ async def login(req: LoginRequest):
 
 @router.get("/verify", response_model=VerifyResponse)
 async def verify(token: str):
+    from backend.services.auth import verify_token
     valid = await verify_token(token)
     return VerifyResponse(valid=valid)
