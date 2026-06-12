@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re as _re
+from collections import OrderedDict
 from dataclasses import dataclass
 from time import monotonic, time
 from typing import Literal
@@ -57,8 +58,14 @@ class SearchCacheEntry:
     created_at: float
 
 
-_SOURCE_HEALTH: dict[str, SourceHealthState] = {}
+_SOURCE_HEALTH: OrderedDict[str, SourceHealthState] = OrderedDict()
 _SEARCH_CACHE: dict[str, SearchCacheEntry] = {}
+MAX_SOURCE_HEALTH_ENTRIES = 500
+
+
+def _evict_source_health():
+    while len(_SOURCE_HEALTH) > MAX_SOURCE_HEALTH_ENTRIES:
+        _SOURCE_HEALTH.popitem(last=False)
 
 
 def _resolve_book_url_template(
@@ -265,6 +272,7 @@ def _results_signature(items: list[SearchResultItem]) -> tuple[str, ...]:
 
 def _record_source_success(source_url: str, latency_ms: float):
     state = _SOURCE_HEALTH.setdefault(source_url, SourceHealthState())
+    _SOURCE_HEALTH.move_to_end(source_url)
     state.success_count += 1
     if state.avg_latency_ms <= 0:
         state.avg_latency_ms = latency_ms
@@ -273,10 +281,12 @@ def _record_source_success(source_url: str, latency_ms: float):
     state.last_error = ""
     state.last_success_at = time()
     state.updated_at = time()
+    _evict_source_health()
 
 
 def _record_source_failure(source_url: str, latency_ms: float, error: str, timed_out: bool):
     state = _SOURCE_HEALTH.setdefault(source_url, SourceHealthState())
+    _SOURCE_HEALTH.move_to_end(source_url)
     state.failure_count += 1
     if timed_out:
         state.timeout_count += 1
@@ -286,6 +296,7 @@ def _record_source_failure(source_url: str, latency_ms: float, error: str, timed
         state.avg_latency_ms = state.avg_latency_ms * 0.75 + latency_ms * 0.25
     state.last_error = (error or "search-failed")[:200]
     state.updated_at = time()
+    _evict_source_health()
 
 
 def _source_priority_sort_key(source_entry) -> tuple[float, str]:
