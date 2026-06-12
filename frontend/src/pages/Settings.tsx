@@ -17,6 +17,90 @@ import {
 
 const SOURCE_PAGE_SIZE = 20;
 
+interface AuthSectionProps {
+  onLogin: () => void;
+}
+
+function AuthSection({ onLogin }: AuthSectionProps) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [token, setToken] = useState(() => localStorage.getItem("reader-auth-token"));
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, device_name: navigator.userAgent }),
+      });
+
+      if (!res.ok) {
+        setError("密码错误");
+        return;
+      }
+
+      const data = await res.json();
+      localStorage.setItem("reader-auth-token", data.token);
+      localStorage.setItem("reader-auth-expires", String(Date.now() + data.expires_in_days * 86400000));
+      setToken(data.token);
+      onLogin();
+    } catch {
+      setError("连接失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("reader-auth-token");
+    localStorage.removeItem("reader-auth-expires");
+    setToken(null);
+    setPassword("");
+  };
+
+  if (token) {
+    return (
+      <div className="p-2 rounded-lg bg-green-50 border border-green-200">
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] text-green-700">已登录</span>
+          <button
+            onClick={handleLogout}
+            className="text-[11px] text-red-500 hover:text-red-600"
+          >
+            退出登录
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleLogin} className="space-y-2">
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="输入密码登录"
+        className="w-full px-3 py-2 text-[12px] border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#c45d35]"
+        autoFocus
+      />
+      {error && <p className="text-[11px] text-red-500">{error}</p>}
+      <button
+        type="submit"
+        disabled={loading || !password}
+        className="w-full px-3 py-2 text-[12px] font-semibold text-white bg-[#c45d35] rounded-lg hover:bg-[#b3522d] disabled:opacity-50"
+      >
+        {loading ? "验证中..." : "登录"}
+      </button>
+    </form>
+  );
+}
+
 function summarizeBackupRestore(result: BackupRestoreResponse): string {
   const tableStats = Object.values(result.tables);
   const fileStats = Object.values(result.files);
@@ -494,6 +578,14 @@ export default function Settings() {
   return (
     <div className="max-w-[860px] mx-auto">
       <h1 className="text-[13px] font-semibold text-[#86868b] uppercase tracking-wider mb-4">设置</h1>
+
+      <section className="mb-4 p-3 rounded-xl bg-black/[0.03] border border-black/[0.05]">
+        <h2 className="text-[12px] font-semibold text-[#1d1d1f] mb-3">认证管理</h2>
+        <p className="text-[11px] text-[#86868b] mb-3">
+          设置密码保护系统访问。首次访问需要输入密码，验证通过后 Token 保存在本地，90 天内无需重新输入。
+        </p>
+        <AuthSection onLogin={() => window.location.reload()} />
+      </section>
 
       <section className="mb-4 p-3 rounded-xl bg-black/[0.03] border border-black/[0.05]">
         <div className="flex items-center justify-between mb-3 gap-2">
