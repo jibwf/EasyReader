@@ -6,8 +6,8 @@ from backend.config import Settings
 
 
 @pytest.mark.asyncio
-async def test_no_api_key_configured_allows_all(monkeypatch):
-    monkeypatch.setattr("backend.config.settings", Settings(api_key="", password=""))
+async def test_no_password_configured_allows_all(monkeypatch):
+    monkeypatch.setattr("backend.config.settings", Settings(password=""))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/version")
@@ -15,8 +15,8 @@ async def test_no_api_key_configured_allows_all(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_api_key_required_rejects_missing(monkeypatch):
-    monkeypatch.setattr("backend.config.settings", Settings(api_key="secret123", password=""))
+async def test_password_required_rejects_unauthenticated(monkeypatch):
+    monkeypatch.setattr("backend.config.settings", Settings(password="secret123"))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/books")
@@ -25,27 +25,21 @@ async def test_api_key_required_rejects_missing(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_api_key_required_rejects_wrong_key(monkeypatch):
-    monkeypatch.setattr("backend.config.settings", Settings(api_key="secret123", password=""))
+async def test_version_endpoint_always_accessible(monkeypatch):
+    monkeypatch.setattr("backend.config.settings", Settings(password="secret123"))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/books", headers={"x-api-key": "wrong"})
-        assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_api_key_required_accepts_correct_key(monkeypatch):
-    monkeypatch.setattr("backend.config.settings", Settings(api_key="secret123", password=""))
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/books", headers={"x-api-key": "secret123"})
+        resp = await client.get("/api/version")
         assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_version_endpoint_always_accessible(monkeypatch):
-    monkeypatch.setattr("backend.config.settings", Settings(api_key="secret123", password=""))
+async def test_protected_endpoint_with_valid_token(monkeypatch):
+    monkeypatch.setattr("backend.config.settings", Settings(password="secret123"))
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/version")
+        login_resp = await client.post("/api/auth/login", json={"password": "secret123"})
+        token = login_resp.json()["token"]
+
+        resp = await client.get("/api/books", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200

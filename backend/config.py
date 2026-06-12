@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     request_timeout: int = 15
     max_concurrent_requests: int = 10
     offline_task_worker_enabled: bool = True
-    api_key: str = ""  # Empty = auth disabled (backward compatible)
     max_upload_size_mb: int = 200
     cors_origins: str = "*"
     password: str = ""  # Empty = auth disabled

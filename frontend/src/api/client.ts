@@ -50,11 +50,6 @@ export function getClientRequestHeaders(init?: HeadersInit): Headers {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const apiKey = localStorage.getItem("reader-api-key") || "";
-  if (apiKey) {
-    headers.set("X-API-Key", apiKey);
-  }
-
   return headers;
 }
 

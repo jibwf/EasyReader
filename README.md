@@ -148,7 +148,6 @@ npm run dev
 | `READER_REQUEST_TIMEOUT` | `15` | 请求超时时间（秒） |
 | `READER_MAX_CONCURRENT_REQUESTS` | `10` | 最大并发请求数 |
 | `READER_OFFLINE_TASK_WORKER_ENABLED` | `True` | 是否启用离线任务 Worker |
-| `READER_API_KEY` | `""` | API 认证密钥（空=禁用认证） |
 | `READER_PASSWORD` | `""` | 登录密码（空=禁用密码认证） |
 | `READER_TOKEN_EXPIRY_DAYS` | `90` | 登录 Token 有效期（天） |
 | `READER_MAX_UPLOAD_SIZE_MB` | `200` | 最大上传文件大小（MB） |

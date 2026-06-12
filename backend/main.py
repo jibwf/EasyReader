@@ -45,8 +45,6 @@ app = FastAPI(
     title="EasyReader",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs" if settings.api_key else "/docs",
-    redoc_url="/redoc" if settings.api_key else "/redoc",
 )
 
 app.add_middleware(
@@ -67,13 +65,8 @@ async def enforce_api_auth(request: Request, call_next):
         return await call_next(request)
 
     from backend.config import settings
-    if not settings.api_key and not settings.password:
+    if not settings.password:
         return await call_next(request)
-
-    if settings.api_key:
-        provided_key = request.headers.get("x-api-key", "")
-        if provided_key == settings.api_key:
-            return await call_next(request)
 
     auth_header = request.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
