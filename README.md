@@ -149,9 +149,25 @@ npm run dev
 | `READER_MAX_CONCURRENT_REQUESTS` | `10` | 最大并发请求数 |
 | `READER_OFFLINE_TASK_WORKER_ENABLED` | `True` | 是否启用离线任务 Worker |
 | `READER_API_KEY` | `""` | API 认证密钥（空=禁用认证） |
+| `READER_PASSWORD` | `""` | 登录密码（空=禁用密码认证） |
+| `READER_TOKEN_EXPIRY_DAYS` | `90` | 登录 Token 有效期（天） |
 | `READER_MAX_UPLOAD_SIZE_MB` | `200` | 最大上传文件大小（MB） |
 | `READER_CORS_ORIGINS` | `"*"` | 允许的 CORS 来源（逗号分隔） |
 | `READER_USER_AGENT` | Chrome 120 UA | 请求 User-Agent |
+
+## 认证配置
+
+设置密码保护系统访问：
+
+```bash
+# 设置密码（环境变量）
+READER_PASSWORD=your-secret-password
+
+# 可选：设置 Token 有效期（默认 90 天）
+READER_TOKEN_EXPIRY_DAYS=90
+```
+
+首次访问时需要输入密码，验证通过后 Token 保存在浏览器/客户端本地，90 天内无需重新输入。
 
 ## 测试与构建
 
