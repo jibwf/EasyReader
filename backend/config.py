@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     api_key: str = ""  # Empty = auth disabled (backward compatible)
     max_upload_size_mb: int = 200
     cors_origins: str = "*"
+    password: str = ""  # Empty = auth disabled
+    token_expiry_days: int = 90
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
