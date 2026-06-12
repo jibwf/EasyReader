@@ -105,7 +105,7 @@ async def get_manga_ranking(category: str = Query(default="全部漫画")):
         engine = TauriEngine(source_code, manga_source_url)
         return engine.call("explore", 1, category)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result_json = await loop.run_in_executor(None, run_explore)
     except Exception:

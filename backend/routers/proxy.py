@@ -39,7 +39,7 @@ async def proxy_image(
     if not referer:
         referer = f"{parsed.scheme}://{parsed.netloc}/"
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _fetch_image, url, referer)
 
     if not result:

@@ -512,7 +512,7 @@ def _clean_content(text: str) -> str:
 async def _get_chapters_tauri(source_code: str, source_url: str, book_url: str) -> list[ChapterSchema]:
     """Get chapters using Tauri JS engine."""
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def run():
         engine = TauriEngine(source_code, source_url)
@@ -537,7 +537,7 @@ async def _get_chapters_tauri(source_code: str, source_url: str, book_url: str) 
 async def _get_chapter_content_tauri(source_code: str, source_url: str, chapter_url: str) -> str:
     """Get chapter content using Tauri JS engine."""
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def run():
         engine = TauriEngine(source_code, source_url)

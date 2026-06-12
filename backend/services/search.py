@@ -418,7 +418,7 @@ async def _search_single_source_entry(source_db, keyword: str, sem: asyncio.Sema
 
         source_meta = parse_tauri_metadata(raw_source)
         source_name = source_meta.get("name", source_db.book_source_name)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             _do_tauri_search,

@@ -41,7 +41,13 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(title="EasyReader", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="EasyReader",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.api_key else "/docs",
+    redoc_url="/redoc" if settings.api_key else "/redoc",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,11 +68,15 @@ async def enforce_api_auth(request: Request, call_next):
 
 
 @app.middleware("http")
-async def no_store_api_responses(request: Request, call_next):
+async def security_headers(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-Server-Version"] = read_server_version()
         response.headers["X-API-Contract-Version"] = API_CONTRACT_VERSION
         response.headers["X-Supported-Client-Types"] = ",".join(SUPPORTED_CLIENT_TYPES)
