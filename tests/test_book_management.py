@@ -87,6 +87,44 @@ async def test_local_txt_import_supports_gb18030_encoding(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_local_txt_import_splits_multiple_chapters(tmp_path):
+    await close_db()
+    settings.data_dir = tmp_path
+    settings.db_path = tmp_path / "reader.db"
+    settings.cache_dir = tmp_path / "cache"
+
+    raw_text = "\n".join(
+        [
+            "第一章 起风了",
+            "这是第一章正文。",
+            "",
+            "第二章 雨将至",
+            "这是第二章正文。",
+        ]
+    )
+    imported = await import_local_txt("multi.txt", raw_text.encode("utf-8"))
+    assert imported["book_id"] > 0
+    assert imported["chapters"] == 2
+
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT id, book_url, source_url, total_chapters, last_chapter FROM books WHERE id = ?",
+        (imported["book_id"],),
+    )
+    row = await cursor.fetchone()
+    assert row["total_chapters"] == 2
+    assert row["last_chapter"] == "第二章 雨将至"
+
+    chapters = await get_chapters(row["book_url"], row["source_url"])
+    assert [chapter.title for chapter in chapters] == ["第一章 起风了", "第二章 雨将至"]
+
+    first_content = await get_chapter_content(chapters[0].url, row["source_url"])
+    second_content = await get_chapter_content(chapters[1].url, row["source_url"])
+    assert "第一章正文" in first_content
+    assert "第二章正文" in second_content
+
+
+@pytest.mark.asyncio
 async def test_reimporting_same_txt_keeps_single_chapter(tmp_path):
     await close_db()
     settings.data_dir = tmp_path

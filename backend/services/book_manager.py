@@ -162,11 +162,84 @@ def _decode_local_txt(raw_content: bytes) -> str:
     return max(decoded_candidates, key=_text_quality_score)
 
 
+_TXT_CHINESE_CHAPTER_RE = re.compile(
+    r"^第\s*[0-9０-９零〇一二两三四五六七八九十百千万]+\s*[章节卷回部篇幕话集](?:\s*[：:、\-_.．]\s*|\s+)?[^\n]{0,40}$"
+)
+_TXT_ENGLISH_CHAPTER_RE = re.compile(
+    r"^(?:chapter|chap)\s+[0-9ivxlcdm]+(?:\s*[：:.\-]\s*|\s+)?[^\n]{0,40}$",
+    flags=re.IGNORECASE,
+)
+_TXT_SPECIAL_CN_RE = re.compile(
+    r"^(?:序章|序言|楔子|引子|前言|后记|尾声|终章|番外(?:篇)?|附录)(?:\s+[^\n]{0,30})?$"
+)
+_TXT_SPECIAL_EN_RE = re.compile(
+    r"^(?:prologue|epilogue|preface|foreword|afterword)(?:\s+[^\n]{0,30})?$",
+    flags=re.IGNORECASE,
+)
+
+
+def _normalize_txt_chapter_title(line: str) -> str:
+    normalized = line.replace("\u3000", " ").replace("\xa0", " ").strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip("\ufeff")
+
+
+def _is_likely_txt_chapter_title(line: str) -> bool:
+    candidate = _normalize_txt_chapter_title(line)
+    if not candidate or len(candidate) > 80:
+        return False
+
+    unwrapped = candidate.strip("[]【】()（）<>《》「」『』")
+    if not unwrapped:
+        return False
+
+    return bool(
+        _TXT_CHINESE_CHAPTER_RE.fullmatch(unwrapped)
+        or _TXT_ENGLISH_CHAPTER_RE.fullmatch(unwrapped)
+        or _TXT_SPECIAL_CN_RE.fullmatch(unwrapped)
+        or _TXT_SPECIAL_EN_RE.fullmatch(unwrapped)
+    )
+
+
+def _split_local_txt_chapters(text: str) -> list[tuple[str, str]]:
+    normalized_text = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    lines = normalized_text.split("\n")
+
+    heading_positions: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        if _is_likely_txt_chapter_title(line):
+            heading_positions.append((idx, _normalize_txt_chapter_title(line)))
+
+    if not heading_positions:
+        body = normalized_text.strip()
+        return [("正文", body or normalized_text)]
+
+    chapters: list[tuple[str, str]] = []
+    lead_text = "\n".join(lines[: heading_positions[0][0]]).strip()
+    if lead_text:
+        chapters.append(("前言", lead_text))
+
+    for idx, (start_line, heading_title) in enumerate(heading_positions):
+        end_line = heading_positions[idx + 1][0] if idx + 1 < len(heading_positions) else len(lines)
+        chapter_text = "\n".join(lines[start_line:end_line]).strip()
+        if not chapter_text:
+            continue
+        chapters.append((heading_title or f"第{idx + 1}章", chapter_text))
+
+    if not chapters:
+        body = normalized_text.strip()
+        return [("正文", body or normalized_text)]
+
+    return chapters
+
+
 async def import_local_txt(file_name: str, raw_content: bytes) -> dict:
     text = _decode_local_txt(raw_content)
 
     if not text.strip():
         raise ValueError("TXT file is empty")
+
+    chapters = _split_local_txt_chapters(text)
 
     book_name = Path(file_name).stem or "Imported TXT"
     book_url = _make_local_book_url("txt", raw_content)
@@ -194,8 +267,8 @@ async def import_local_txt(file_name: str, raw_content: bytes) -> dict:
             book_url,
             source_url,
             PUBLISHED_BOOK_CATEGORY_NAME,
-            "正文",
-            1,
+            chapters[-1][0],
+            len(chapters),
         ),
     )
 
@@ -204,19 +277,21 @@ async def import_local_txt(file_name: str, raw_content: bytes) -> dict:
     await db.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
-    await db.execute(
-        "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
-        (book_id, "正文", f"{book_url}#1", 0),
-    )
-    await db.execute(
-        """INSERT INTO chapter_cache
-        (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
-        VALUES (?, ?, ?, ?, ?, 'novel')""",
-        (book_id, 0, "正文", f"{book_url}#1", text),
-    )
+    for idx, (chapter_title, chapter_text) in enumerate(chapters):
+        chapter_url = f"{book_url}#{idx + 1}"
+        await db.execute(
+            "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
+            (book_id, chapter_title, chapter_url, idx),
+        )
+        await db.execute(
+            """INSERT INTO chapter_cache
+            (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
+            VALUES (?, ?, ?, ?, ?, 'novel')""",
+            (book_id, idx, chapter_title, chapter_url, chapter_text),
+        )
     await db.commit()
 
-    return {"book_id": book_id, "name": book_name}
+    return {"book_id": book_id, "name": book_name, "chapters": len(chapters)}
 
 
 async def import_local_epub(file_name: str, raw_content: bytes) -> dict:
