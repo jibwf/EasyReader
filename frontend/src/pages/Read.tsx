@@ -10,12 +10,6 @@ import { getClientIdentity } from "@/utils/client-identity";
 import { loadChaptersCache, saveChaptersCache } from "@/utils/local-cache";
 import { enqueueSyncProgress, flushSyncProgressQueue, getSyncProgressQueueSize } from "@/utils/sync-queue";
 
-const AUTO_PAGE_TURN_INTERVAL_MS = {
-  slow: 12000,
-  medium: 8000,
-  fast: 5000,
-} as const;
-
 const CONFLICT_RESOLVE_SYNC_SUPPRESS_MS = 5000;
 const PROGRESS_CONFLICT_THRESHOLD = 0.3;
 
@@ -481,32 +475,49 @@ export default function Read() {
       return;
     }
 
-    const intervalMs = AUTO_PAGE_TURN_INTERVAL_MS[settings.autoPageTurnSpeed];
-    autoPageTurnTimerRef.current = setTimeout(() => {
-      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-      if (maxScroll <= 0) {
-        const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
-        if (next) {
-          goToChapter(next);
-        }
+    let stopped = false;
+
+    const scheduleNextTurn = () => {
+      if (stopped) {
         return;
       }
 
-      const currentScroll = window.scrollY;
-      const nearBottom = currentScroll >= maxScroll - 12;
-      if (nearBottom) {
-        const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
-        if (next) {
-          goToChapter(next);
+      autoPageTurnTimerRef.current = setTimeout(() => {
+        if (stopped) {
+          return;
         }
-        return;
-      }
 
-      const targetScroll = Math.min(currentScroll + window.innerHeight * 0.88, maxScroll);
-      window.scrollTo({ top: targetScroll, behavior: "smooth" });
-    }, intervalMs);
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        if (maxScroll <= 0) {
+          const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
+          if (next) {
+            goToChapter(next);
+          }
+          scheduleNextTurn();
+          return;
+        }
+
+        const currentScroll = window.scrollY;
+        const nearBottom = currentScroll >= maxScroll - 12;
+        if (nearBottom) {
+          const next = chapters.find((ch) => ch.idx === currentViewIdx + 1);
+          if (next) {
+            goToChapter(next);
+          }
+          scheduleNextTurn();
+          return;
+        }
+
+        const targetScroll = Math.min(currentScroll + window.innerHeight * 0.88, maxScroll);
+        window.scrollTo({ top: targetScroll, behavior: "smooth" });
+        scheduleNextTurn();
+      }, settings.autoPageTurnIntervalMs);
+    };
+
+    scheduleNextTurn();
 
     return () => {
+      stopped = true;
       if (autoPageTurnTimerRef.current) {
         clearTimeout(autoPageTurnTimerRef.current);
       }
@@ -519,7 +530,7 @@ export default function Read() {
     loading,
     chapters,
     currentViewIdx,
-    settings.autoPageTurnSpeed,
+    settings.autoPageTurnIntervalMs,
     goToChapter,
   ]);
 

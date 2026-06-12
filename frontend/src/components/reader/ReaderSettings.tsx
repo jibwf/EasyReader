@@ -1,7 +1,9 @@
 import {
+  AUTO_PAGE_TURN_INTERVAL_MS_MAX,
+  AUTO_PAGE_TURN_INTERVAL_MS_MIN,
+  AUTO_PAGE_TURN_INTERVAL_MS_STEP,
   normalizeReaderTheme,
   useReaderStore,
-  type AutoPageTurnSpeed,
   type NormalizedReaderTheme,
 } from "@/stores/readerStore";
 
@@ -11,11 +13,9 @@ interface Props {
   onToggleAutoPageTurn: () => void;
 }
 
-const speedOptions: Array<{ key: AutoPageTurnSpeed; label: string; hint: string }> = [
-  { key: "slow", label: "慢", hint: "12秒/页" },
-  { key: "medium", label: "中", hint: "8秒/页" },
-  { key: "fast", label: "快", hint: "5秒/页" },
-];
+function formatIntervalLabel(intervalMs: number): string {
+  return `${(intervalMs / 1000).toFixed(1)}秒/页`;
+}
 
 const themeOptions: Array<{
   key: NormalizedReaderTheme;
@@ -35,6 +35,9 @@ export default function ReaderSettings({ onClose, autoPageTurnEnabled, onToggleA
   const { settings, updateSettings } = useReaderStore();
   const activeTheme = normalizeReaderTheme(settings.theme);
   const isNight = activeTheme === "night";
+  const autoTurnIntervalLabel = formatIntervalLabel(settings.autoPageTurnIntervalMs);
+  const autoTurnMinLabel = formatIntervalLabel(AUTO_PAGE_TURN_INTERVAL_MS_MIN);
+  const autoTurnMaxLabel = formatIntervalLabel(AUTO_PAGE_TURN_INTERVAL_MS_MAX);
 
   const panelClass = isNight ? "bg-[#1b1c1f] text-[#e5e5e7]" : "bg-white text-[#1d1d1f]";
   const mutedTextClass = isNight ? "text-[#a7a7ad]" : "text-[#6e6e73]";
@@ -156,19 +159,30 @@ export default function ReaderSettings({ onClose, autoPageTurnEnabled, onToggleA
               {autoPageTurnEnabled ? "暂停" : "开始"}
             </button>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {speedOptions.map((option) => (
-              <button
-                key={option.key}
-                onClick={() => updateSettings({ autoPageTurnSpeed: option.key })}
-                className={`rounded-lg border px-2 py-2 text-xs transition-colors ${
-                  settings.autoPageTurnSpeed === option.key ? activeOptionClass : inactiveOptionClass
-                }`}
-              >
-                <div>{option.label}速</div>
-                <div className={`mt-1 text-[10px] ${mutedTextClass}`}>{option.hint}</div>
-              </button>
-            ))}
+          <div className={`rounded-lg border px-3 py-3 ${controlBorderClass}`}>
+            <div className={`mb-2 flex items-center justify-between text-[11px] ${mutedTextClass}`}>
+              <span>更快</span>
+              <span className="font-medium">{autoTurnIntervalLabel}</span>
+              <span>更慢</span>
+            </div>
+            <input
+              type="range"
+              min={AUTO_PAGE_TURN_INTERVAL_MS_MIN}
+              max={AUTO_PAGE_TURN_INTERVAL_MS_MAX}
+              step={AUTO_PAGE_TURN_INTERVAL_MS_STEP}
+              value={settings.autoPageTurnIntervalMs}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value);
+                if (Number.isFinite(nextValue)) {
+                  updateSettings({ autoPageTurnIntervalMs: nextValue });
+                }
+              }}
+              className="w-full accent-[#c45d35]"
+            />
+            <div className={`mt-1 flex items-center justify-between text-[10px] ${mutedTextClass}`}>
+              <span>{autoTurnMinLabel}</span>
+              <span>{autoTurnMaxLabel}</span>
+            </div>
           </div>
           <p className={`mt-2 text-[11px] ${mutedTextClass}`}>
             自动翻页会持续运行，直到你手动点击“暂停”。
