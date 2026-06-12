@@ -315,7 +315,7 @@ export default function Settings() {
   };
 
   const handleClearBrowserCache = async () => {
-    const confirmed = window.confirm("确认清理浏览器缓存吗？这会移除本地章节和离线静态缓存。");
+    const confirmed = window.confirm("确认彻底清理浏览器缓存吗？这会清理 localStorage、sessionStorage、IndexedDB 与 Cache Storage，并自动刷新页面。");
     if (!confirmed) {
       return;
     }
@@ -329,13 +329,17 @@ export default function Settings() {
 
       if (latest.chapterEntries === 0 && latest.cacheStorageEntries === 0) {
         setBrowserCacheMessage(
-          `浏览器缓存已清理（清理 Cache Storage ${result.cacheStorageBucketsCleared} 个缓存桶）`
+          `浏览器缓存已彻底清理（localStorage ${result.localStorageEntriesCleared} 条，sessionStorage ${result.sessionStorageEntriesCleared} 条，IndexedDB ${result.indexedDbDatabasesCleared} 个，Cache Storage ${result.cacheStorageBucketsCleared} 个缓存桶），正在刷新...`
         );
       } else {
         setBrowserCacheMessage(
-          `已执行清理，但仍有 ${latest.chapterEntries} 条章节或 ${latest.cacheStorageEntries} 条静态缓存`
+          `已执行彻底清理，但仍有 ${latest.chapterEntries} 条章节或 ${latest.cacheStorageEntries} 条静态缓存，将继续刷新页面以完成重置...`
         );
       }
+
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 400);
     } catch {
       setBrowserCacheMessage("浏览器缓存清理失败");
     } finally {

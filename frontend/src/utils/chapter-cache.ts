@@ -226,12 +226,112 @@ export async function getBrowserCacheStats(): Promise<BrowserCacheStats> {
 
 export interface BrowserCacheClearResult {
   cacheStorageBucketsCleared: number;
+  indexedDbDatabasesCleared: number;
+  localStorageEntriesCleared: number;
+  sessionStorageEntriesCleared: number;
+}
+
+const FALLBACK_INDEXED_DB_NAMES = ["keyval-store", "workbox-expiration"];
+
+async function listIndexedDbNames(): Promise<string[]> {
+  if (typeof window === "undefined" || !window.indexedDB) {
+    return [];
+  }
+
+  const indexedDbFactory = window.indexedDB as IDBFactory & {
+    databases?: () => Promise<Array<{ name?: string }>>;
+  };
+
+  if (typeof indexedDbFactory.databases !== "function") {
+    return FALLBACK_INDEXED_DB_NAMES;
+  }
+
+  try {
+    const databases = await indexedDbFactory.databases();
+    const names = databases
+      .map((item) => (item?.name || "").trim())
+      .filter((name) => name.length > 0);
+
+    if (names.length > 0) {
+      return Array.from(new Set(names));
+    }
+  } catch {
+    // Ignore and fallback to known database names.
+  }
+
+  return FALLBACK_INDEXED_DB_NAMES;
+}
+
+async function deleteIndexedDbDatabase(name: string): Promise<boolean> {
+  if (!name || typeof window === "undefined" || !window.indexedDB) {
+    return false;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const request = window.indexedDB.deleteDatabase(name);
+    let settled = false;
+
+    const finish = (ok: boolean) => {
+      if (!settled) {
+        settled = true;
+        resolve(ok);
+      }
+    };
+
+    request.onsuccess = () => finish(true);
+    request.onerror = () => finish(false);
+    request.onblocked = () => finish(false);
+  });
+}
+
+async function clearAllIndexedDbDatabases(): Promise<{ databasesCleared: number }> {
+  const dbNames = await listIndexedDbNames();
+  if (dbNames.length === 0) {
+    return { databasesCleared: 0 };
+  }
+
+  const results = await Promise.all(dbNames.map((name) => deleteIndexedDbDatabase(name)));
+  return {
+    databasesCleared: results.filter(Boolean).length,
+  };
+}
+
+function clearWebStorage(): { localStorageEntriesCleared: number; sessionStorageEntriesCleared: number } {
+  let localStorageEntriesCleared = 0;
+  let sessionStorageEntriesCleared = 0;
+
+  try {
+    localStorageEntriesCleared = window.localStorage.length;
+    window.localStorage.clear();
+  } catch {
+    localStorageEntriesCleared = 0;
+  }
+
+  try {
+    sessionStorageEntriesCleared = window.sessionStorage.length;
+    window.sessionStorage.clear();
+  } catch {
+    sessionStorageEntriesCleared = 0;
+  }
+
+  return {
+    localStorageEntriesCleared,
+    sessionStorageEntriesCleared,
+  };
 }
 
 export async function clearBrowserCache(): Promise<BrowserCacheClearResult> {
+  const storageSnapshot = clearWebStorage();
   await clearAllChapterCache();
-  const storageResult = await clearCacheStorage();
+  const [cacheStorageResult, indexedDbResult] = await Promise.all([
+    clearCacheStorage(),
+    clearAllIndexedDbDatabases(),
+  ]);
+
   return {
-    cacheStorageBucketsCleared: storageResult.bucketsCleared,
+    cacheStorageBucketsCleared: cacheStorageResult.bucketsCleared,
+    indexedDbDatabasesCleared: indexedDbResult.databasesCleared,
+    localStorageEntriesCleared: storageSnapshot.localStorageEntriesCleared,
+    sessionStorageEntriesCleared: storageSnapshot.sessionStorageEntriesCleared,
   };
 }
