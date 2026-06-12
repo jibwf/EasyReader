@@ -64,6 +64,29 @@ async def test_local_txt_import_can_be_read_via_content_service(tmp_path, monkey
 
 
 @pytest.mark.asyncio
+async def test_local_txt_import_supports_gb18030_encoding(tmp_path):
+    await close_db()
+    settings.data_dir = tmp_path
+    settings.db_path = tmp_path / "reader.db"
+    settings.cache_dir = tmp_path / "cache"
+
+    gb18030_text = "第一章\n这是GB18030编码正文，中文不应乱码。"
+    imported = await import_local_txt("gb18030.txt", gb18030_text.encode("gb18030"))
+    assert imported["book_id"] > 0
+
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM books WHERE id = ?", (imported["book_id"],))
+    row = await cursor.fetchone()
+
+    chapters = await get_chapters(row["book_url"], row["source_url"])
+    assert len(chapters) == 1
+
+    content = await get_chapter_content(chapters[0].url, row["source_url"])
+    assert "GB18030编码正文" in content
+    assert "乱码" in content
+
+
+@pytest.mark.asyncio
 async def test_reimporting_same_txt_keeps_single_chapter(tmp_path):
     await close_db()
     settings.data_dir = tmp_path

@@ -7,6 +7,7 @@ import re
 from pathlib import PurePosixPath
 
 from bs4 import BeautifulSoup
+from charset_normalizer import from_bytes
 
 from backend.database import get_db
 from backend.models.book import BookImportItemSchema, PUBLISHED_BOOK_CATEGORY_NAME
@@ -119,11 +120,50 @@ async def import_books_from_json(raw_json: bytes) -> dict:
     return {"imported": imported, "failed": failed}
 
 
-async def import_local_txt(file_name: str, raw_content: bytes) -> dict:
+def _text_quality_score(text: str) -> float:
+    if not text:
+        return float("-inf")
+
+    total = len(text)
+    printable = sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t")
+    replacement = text.count("\ufffd")
+    null_bytes = text.count("\x00")
+    controls = sum(1 for ch in text if ord(ch) < 32 and ch not in "\n\r\t")
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+
+    printable_ratio = printable / total
+    cjk_ratio = cjk / total
+
+    return (printable_ratio * 100.0) + (cjk_ratio * 30.0) - (replacement * 5.0) - (null_bytes * 20.0) - (controls * 2.0)
+
+
+def _decode_local_txt(raw_content: bytes) -> str:
+    if not raw_content:
+        return ""
+
+    decoded_candidates: list[str] = []
+    for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "gb18030", "gbk", "big5"):
+        try:
+            decoded_candidates.append(raw_content.decode(encoding))
+        except UnicodeDecodeError:
+            continue
+
     try:
-        text = raw_content.decode("utf-8")
-    except UnicodeDecodeError:
-        text = raw_content.decode("utf-8", errors="ignore")
+        detected = from_bytes(raw_content).best()
+        if detected is not None:
+            decoded_candidates.append(str(detected))
+    except Exception:
+        # Detection failures should not break import flow.
+        pass
+
+    if not decoded_candidates:
+        return raw_content.decode("utf-8", errors="ignore")
+
+    return max(decoded_candidates, key=_text_quality_score)
+
+
+async def import_local_txt(file_name: str, raw_content: bytes) -> dict:
+    text = _decode_local_txt(raw_content)
 
     if not text.strip():
         raise ValueError("TXT file is empty")
