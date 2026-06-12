@@ -3,6 +3,7 @@ from fastapi.responses import Response
 
 from backend.models.backup import BackupConflictPolicy, BackupRestoreMode, BackupRestoreResponse
 from backend.services.backup_manager import create_backup_archive, restore_backup_archive
+from backend.utils.upload_guard import validate_upload_size
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
@@ -20,7 +21,7 @@ async def restore_backup(
     mode: BackupRestoreMode = Query(default="incremental"),
     conflict_policy: BackupConflictPolicy = Query(default="backup_wins"),
 ):
-    raw_archive = await file.read()
+    raw_archive = await validate_upload_size(file)
     if not raw_archive:
         raise HTTPException(status_code=400, detail="Empty backup file")
 

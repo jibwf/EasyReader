@@ -30,6 +30,7 @@ from backend.services.book_manager import (
 from backend.services.exporter import export_book
 from backend.config import settings
 from backend.utils.book_key import build_book_key
+from backend.utils.upload_guard import validate_upload_size
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -327,7 +328,7 @@ async def delete_book(book_id: int):
 @router.post("/import")
 async def import_books(file: UploadFile = File(...)):
     suffix = Path(file.filename or "").suffix.lower()
-    raw = await file.read()
+    raw = await validate_upload_size(file)
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file")
 

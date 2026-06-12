@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.services import source_manager
+from backend.utils.upload_guard import validate_list_length
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
@@ -31,6 +32,7 @@ class ImportUrlRequest(BaseModel):
 
 @router.post("/import", response_model=ImportResponse)
 async def import_sources(sources: list[dict]):
+    validate_list_length(sources)
     count = await source_manager.import_sources(sources)
     return ImportResponse(count=count)
 
