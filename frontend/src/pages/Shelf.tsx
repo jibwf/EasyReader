@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, BatchResultItem, BookCategoryItem, BookItem, Chapter, OfflineTaskItem } from "@/api/client";
+import { api, BatchResultItem, BookCategoryItem, BookItem, Chapter, OfflineTaskItem, SyncProgressItem } from "@/api/client";
 import {
   cacheChaptersBulk,
   getCachedChapter,
@@ -20,6 +20,17 @@ type OfflineProgressState = {
 
 const OFFLINE_CHAPTER_BATCH_SIZE = 6;
 
+function formatProgressPercent(position: number): string {
+  const safe = Number.isFinite(position) ? position : 0;
+  const normalized = Math.max(0, Math.min(1, safe));
+  return `${Math.round(normalized * 100)}%`;
+}
+
+function normalizeChapterNumber(chapterIdx: number): number {
+  const safe = Number.isFinite(chapterIdx) ? chapterIdx : 0;
+  return Math.max(1, Math.floor(safe) + 1);
+}
+
 function sortCategoryNames(names: string[]): string[] {
   return Array.from(
     new Set(names.map((name) => name.trim()).filter(Boolean)),
@@ -34,6 +45,7 @@ function sortCategoryNames(names: string[]): string[] {
 
 export default function Shelf() {
   const [books, setBooks] = useState<BookItem[]>(() => loadBooksCache<BookItem>());
+  const [syncProgressByBook, setSyncProgressByBook] = useState<Record<string, SyncProgressItem>>({});
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [editableCategories, setEditableCategories] = useState<string[]>(["网文", "出版"]);
@@ -92,12 +104,22 @@ export default function Shelf() {
   const loadBooks = async () => {
     setLoading(true);
     try {
+      const identity = getClientIdentity();
       const [bookData, categoryData] = await Promise.all([
         api.getBooks(),
         api.getBookCategories(),
       ]);
+      const syncItems = await api.pullAllSyncProgress(identity.userId).catch(() => [] as SyncProgressItem[]);
+      const progressMap = syncItems.reduce<Record<string, SyncProgressItem>>((acc, item) => {
+        const prev = acc[item.book_key];
+        if (!prev || item.revision > prev.revision) {
+          acc[item.book_key] = item;
+        }
+        return acc;
+      }, {});
 
       setBooks(bookData);
+      setSyncProgressByBook(progressMap);
       saveBooksCache(bookData);
       setSelectedIds((prev) => prev.filter((id) => bookData.some((item) => item.id === id)));
 
@@ -140,17 +162,13 @@ export default function Shelf() {
   }, [books]);
 
   const handleClick = async (book: BookItem) => {
-    try {
-      const identity = getClientIdentity();
-      const syncData = await api.pullSyncProgress(identity.userId, 0, 200);
-      const syncProgress = syncData.items.find((item) => item.book_key === book.book_key);
-      if (syncProgress && syncProgress.chapter_url) {
-        navigate(
-          `/read?url=${encodeURIComponent(syncProgress.chapter_url)}&source_url=${encodeURIComponent(syncProgress.source_url)}&title=${encodeURIComponent(syncProgress.chapter_title)}&idx=${syncProgress.chapter_idx}&book_key=${encodeURIComponent(syncProgress.book_key)}&book_url=${encodeURIComponent(book.book_url)}&book_name=${encodeURIComponent(book.name)}&scroll=${syncProgress.position || 0}`
-        );
-        return;
-      }
-    } catch {}
+    const syncProgress = syncProgressByBook[book.book_key];
+    if (syncProgress && syncProgress.chapter_url) {
+      navigate(
+        `/read?url=${encodeURIComponent(syncProgress.chapter_url)}&source_url=${encodeURIComponent(syncProgress.source_url)}&title=${encodeURIComponent(syncProgress.chapter_title)}&idx=${syncProgress.chapter_idx}&book_key=${encodeURIComponent(syncProgress.book_key)}&book_url=${encodeURIComponent(book.book_url)}&book_name=${encodeURIComponent(book.name)}&scroll=${syncProgress.position || 0}`
+      );
+      return;
+    }
     navigate(`/book?book_url=${encodeURIComponent(book.book_url)}&source_url=${encodeURIComponent(book.source_url)}&book_key=${encodeURIComponent(book.book_key)}`);
   };
 
@@ -818,10 +836,14 @@ export default function Shelf() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 md:gap-3">
           {filteredBooks.map((book) => {
+            const syncProgress = syncProgressByBook[book.book_key];
             const currentCategory = book.category_name || "网文";
             const categoryOptions = editableCategories.includes(currentCategory)
               ? editableCategories
               : sortCategoryNames([...editableCategories, currentCategory]);
+            const readingProgressText = syncProgress
+              ? `阅读进度 第 ${normalizeChapterNumber(syncProgress.chapter_idx)} 章 · ${formatProgressPercent(syncProgress.position)}`
+              : "阅读进度 暂无";
 
             return (
               <div
@@ -843,6 +865,9 @@ export default function Shelf() {
                       <p className="text-[15px] font-medium text-[#1d1d1f] truncate">{book.name}</p>
                       <p className="text-[12px] text-[#86868b] mt-1">
                         {book.author ? `${book.author} · ` : ""}总章节 {book.total_chapters} 章
+                      </p>
+                      <p className="text-[11px] text-[#86868b] mt-0.5">
+                        {readingProgressText}
                       </p>
                       <p className="text-[11px] text-[#86868b] mt-0.5">
                         服务器缓存 {book.server_cached_chapters ?? 0}/{book.total_chapters} 章 · 本地缓存 {browserCachedChapterMap[book.book_url] ?? 0} 章

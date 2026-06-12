@@ -28,6 +28,17 @@ const PERIODS = [
 
 const CONTINUE_LIMIT = 8;
 
+function formatProgressPercent(position: number): string {
+  const safe = Number.isFinite(position) ? position : 0;
+  const normalized = Math.max(0, Math.min(1, safe));
+  return `${Math.round(normalized * 100)}%`;
+}
+
+function getChapterNumber(chapterIdx: number): number {
+  const safe = Number.isFinite(chapterIdx) ? chapterIdx : 0;
+  return Math.max(1, Math.floor(safe) + 1);
+}
+
 export default function Home() {
   const [keyword, setKeyword] = useState("");
   const [progress, setProgress] = useState<SyncProgressItem[]>([]);
@@ -39,11 +50,11 @@ export default function Home() {
 
   useEffect(() => {
     const identity = getClientIdentity();
-    Promise.all([api.pullSyncProgress(identity.userId, 0, 200), api.getBooks()])
-      .then(([syncData, visibleBooks]) => {
+    Promise.all([api.pullAllSyncProgress(identity.userId), api.getBooks()])
+      .then(([syncItems, visibleBooks]) => {
         const visibleBookKeys = new Set(visibleBooks.map((book) => book.book_key));
         const latestByBook = new Map<string, SyncProgressItem>();
-        const sorted = [...syncData.items].sort((a, b) => b.revision - a.revision);
+        const sorted = [...syncItems].sort((a, b) => b.revision - a.revision);
 
         for (const item of sorted) {
           if (!visibleBookKeys.has(item.book_key)) continue;
@@ -123,6 +134,9 @@ export default function Home() {
                           {item.book_name}
                         </p>
                         <p className="text-[12px] text-[#86868b] mt-1 truncate">
+                          阅读进度 第{getChapterNumber(item.chapter_idx)}章 · {formatProgressPercent(item.position)}
+                        </p>
+                        <p className="text-[11px] text-[#86868b] mt-0.5 truncate">
                           {item.chapter_title}
                         </p>
                       </div>

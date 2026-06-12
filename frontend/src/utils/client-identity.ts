@@ -1,5 +1,6 @@
 const USER_ID_KEY = "reader_user_id";
 const DEVICE_ID_KEY = "reader_device_id";
+const DEFAULT_USER_ID = "u1";
 
 function randomId(prefix: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -14,7 +15,7 @@ export function getClientIdentity(): { userId: string; deviceId: string } {
   let deviceId = storage.getItem(DEVICE_ID_KEY);
 
   if (!userId) {
-    userId = "demo-user";
+    userId = DEFAULT_USER_ID;
     storage.setItem(USER_ID_KEY, userId);
   }
 
@@ -29,7 +30,7 @@ export function getClientIdentity(): { userId: string; deviceId: string } {
 }
 
 export function setClientUserId(nextUserId: string): string {
-  const normalized = nextUserId.trim() || "demo-user";
+  const normalized = nextUserId.trim() || DEFAULT_USER_ID;
   window.localStorage.setItem(USER_ID_KEY, normalized);
   return normalized;
 }

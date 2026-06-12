@@ -258,6 +258,17 @@ export interface OfflineCatalogItem {
   updated_at: string;
 }
 
+function dedupeLatestSyncProgress(items: SyncProgressItem[]): SyncProgressItem[] {
+  const latestByBook = new Map<string, SyncProgressItem>();
+  for (const item of items) {
+    const previous = latestByBook.get(item.book_key);
+    if (!previous || item.revision > previous.revision) {
+      latestByBook.set(item.book_key, item);
+    }
+  }
+  return [...latestByBook.values()].sort((a, b) => b.revision - a.revision);
+}
+
 export const api = {
   getVersion: () =>
     request<{
@@ -429,6 +440,33 @@ export const api = {
     request<{ items: SyncProgressItem[]; next_cursor: number }>(
       `/sync/progress/pull?user_id=${encodeURIComponent(userId)}&since=${since}&limit=${limit}`
     ),
+
+  pullAllSyncProgress: async (userId: string, limit = 200, maxPages = 10) => {
+    const normalizedLimit = Math.max(1, Math.min(limit, 200));
+    const normalizedMaxPages = Math.max(1, maxPages);
+    let cursor = 0;
+    const merged: SyncProgressItem[] = [];
+
+    for (let page = 0; page < normalizedMaxPages; page += 1) {
+      const data = await request<{ items: SyncProgressItem[]; next_cursor: number }>(
+        `/sync/progress/pull?user_id=${encodeURIComponent(userId)}&since=${cursor}&limit=${normalizedLimit}`
+      );
+
+      if (data.items.length === 0) {
+        break;
+      }
+
+      merged.push(...data.items);
+
+      if (data.items.length < normalizedLimit || data.next_cursor <= cursor) {
+        break;
+      }
+
+      cursor = data.next_cursor;
+    }
+
+    return dedupeLatestSyncProgress(merged);
+  },
 
   upsertSyncBookmarksBatch: (data: {
     user_id: string;
