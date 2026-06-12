@@ -125,6 +125,43 @@ async def test_local_txt_import_splits_multiple_chapters(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_local_txt_import_supports_parenthesized_chapter_titles(tmp_path):
+    await close_db()
+    settings.data_dir = tmp_path
+    settings.db_path = tmp_path / "reader.db"
+    settings.cache_dir = tmp_path / "cache"
+
+    raw_text = "\n".join(
+        [
+            "（1）初战",
+            "这是初战正文。",
+            "",
+            "（三）",
+            "这是第三部分正文。",
+        ]
+    )
+    imported = await import_local_txt("paren.txt", raw_text.encode("utf-8"))
+    assert imported["book_id"] > 0
+    assert imported["chapters"] == 2
+
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT book_url, source_url, total_chapters FROM books WHERE id = ?",
+        (imported["book_id"],),
+    )
+    row = await cursor.fetchone()
+    assert row["total_chapters"] == 2
+
+    chapters = await get_chapters(row["book_url"], row["source_url"])
+    assert [chapter.title for chapter in chapters] == ["（1）初战", "（三）"]
+
+    first_content = await get_chapter_content(chapters[0].url, row["source_url"])
+    second_content = await get_chapter_content(chapters[1].url, row["source_url"])
+    assert "初战正文" in first_content
+    assert "第三部分正文" in second_content
+
+
+@pytest.mark.asyncio
 async def test_reimporting_same_txt_keeps_single_chapter(tmp_path):
     await close_db()
     settings.data_dir = tmp_path

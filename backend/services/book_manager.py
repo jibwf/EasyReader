@@ -169,6 +169,9 @@ _TXT_ENGLISH_CHAPTER_RE = re.compile(
     r"^(?:chapter|chap)\s+[0-9ivxlcdm]+(?:\s*[：:.\-]\s*|\s+)?[^\n]{0,40}$",
     flags=re.IGNORECASE,
 )
+_TXT_PAREN_INDEX_RE = re.compile(
+    r"^[\(\[（【]\s*(?:[0-9０-９]{1,4}|[ivxlcdmIVXLCDM]{1,8}|[零〇一二两三四五六七八九十百千万]{1,8})\s*[\)\]）】](?:\s*[：:、.\-]\s*|\s+)?[^\n]{0,40}$"
+)
 _TXT_SPECIAL_CN_RE = re.compile(
     r"^(?:序章|序言|楔子|引子|前言|后记|尾声|终章|番外(?:篇)?|附录)(?:\s+[^\n]{0,30})?$"
 )
@@ -194,7 +197,8 @@ def _is_likely_txt_chapter_title(line: str) -> bool:
         return False
 
     return bool(
-        _TXT_CHINESE_CHAPTER_RE.fullmatch(unwrapped)
+        _TXT_PAREN_INDEX_RE.fullmatch(candidate)
+        or _TXT_CHINESE_CHAPTER_RE.fullmatch(unwrapped)
         or _TXT_ENGLISH_CHAPTER_RE.fullmatch(unwrapped)
         or _TXT_SPECIAL_CN_RE.fullmatch(unwrapped)
         or _TXT_SPECIAL_EN_RE.fullmatch(unwrapped)
