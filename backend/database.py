@@ -156,6 +156,14 @@ CREATE TABLE IF NOT EXISTS offline_catalog (
 );
 
 CREATE INDEX IF NOT EXISTS idx_offline_catalog_user ON offline_catalog(user_id, device_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS auth_tokens (
+    token TEXT PRIMARY KEY,
+    device_name TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    last_used_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 
