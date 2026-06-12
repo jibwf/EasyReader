@@ -33,7 +33,7 @@ EasyReader 是一个自托管多端阅读平台，包含 FastAPI 后端、React/
 
 ### 1.1 严重安全问题
 
-#### 🔴 无认证/授权系统
+#### 🔴 无认证/授权系统 ✅ 已修复
 
 **影响**: 所有 API 端点完全公开访问
 
@@ -52,6 +52,11 @@ EasyReader 是一个自托管多端阅读平台，包含 FastAPI 后端、React/
 - 可窃取导出文件
 
 **建议**: 实现基于令牌的认证系统（JWT 或 API Key）
+
+**修复**: 已实现密码认证 + 长期 Token（90天有效）
+- 环境变量: `READER_PASSWORD`
+- API: `/api/auth/login`, `/api/auth/verify`
+- Token 存储: localStorage（PWA）/ SharedPreferences（墨水屏）
 
 #### 🔴 服务器端请求伪造 (SSRF)
 
@@ -74,7 +79,7 @@ EasyReader 是一个自托管多端阅读平台，包含 FastAPI 后端、React/
 3. 限制协议（仅允许 http/https）
 4. 添加请求超时
 
-#### 🔴 无文件大小限制
+#### 🔴 无文件大小限制 ✅ 已修复
 
 **影响**: 可导致内存耗尽 (DoS)
 
@@ -93,9 +98,14 @@ EasyReader 是一个自托管多端阅读平台，包含 FastAPI 后端、React/
 2. 限制列表长度（如 3000 项）
 3. 流式处理大文件
 
+**修复**: 已实现
+- 环境变量: `READER_MAX_UPLOAD_SIZE_MB`（默认 200MB）
+- 列表限制: 3000 项
+- HTTP 413 错误响应
+
 ### 1.2 高风险安全问题
 
-#### 🟠 CORS 完全开放
+#### 🟠 CORS 完全开放 ✅ 已修复
 
 **位置**: `backend/main.py:45-50`
 ```python
@@ -110,6 +120,10 @@ app.add_middleware(
 **影响**: 任何网站可发起跨域请求
 
 **建议**: 限制为已知来源（如 `http://localhost:5173`、生产域名）
+
+**修复**: 已实现
+- 环境变量: `READER_CORS_ORIGINS`（默认 `*`）
+- 配置示例: `READER_CORS_ORIGINS=https://read.dclife.fun,http://localhost:5173`
 
 #### 🟠 无速率限制
 
@@ -226,7 +240,7 @@ f"INSERT INTO {table_name} ({quoted_columns}) VALUES ({placeholders})"
 
 **建议**: 类似 Read.tsx，分解为更小的组件和钩子
 
-#### 🔴 内存泄漏 - _SOURCE_HEALTH
+#### 🔴 内存泄漏 - _SOURCE_HEALTH ✅ 已修复
 
 **位置**: `backend/services/search.py:60`
 ```python
@@ -239,6 +253,11 @@ _SOURCE_HEALTH: dict[str, SourceHealthState] = {}
 1. 实现 LRU 缓存（如 `functools.lru_cache`）
 2. 添加过期机制
 3. 限制最大条目数
+
+**修复**: 已实现
+- 使用 `OrderedDict` 实现 LRU 淘汰
+- 最大条目数: 500
+- 最近访问的条目不会被移除
 
 ### 2.2 高风险代码质量问题
 
@@ -254,7 +273,7 @@ _SOURCE_HEALTH: dict[str, SourceHealthState] = {}
 
 **建议**: 至少记录错误到日志
 
-#### 🟠 废弃 API 使用
+#### 🟠 废弃 API 使用 ✅ 已修复
 
 **位置**: 多个文件
 - `backend/routers/proxy.py:42`
@@ -265,6 +284,8 @@ _SOURCE_HEALTH: dict[str, SourceHealthState] = {}
 **问题**: 使用 `asyncio.get_event_loop()`（Python 3.10+ 已废弃）
 
 **建议**: 改用 `asyncio.get_running_loop()`
+
+**修复**: 已将所有 5 处 `get_event_loop()` 替换为 `get_running_loop()`
 
 #### 🟠 全局可变单例
 

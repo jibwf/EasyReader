@@ -14,7 +14,7 @@ commits: 6488f06..b7760e5
 
 Four critical/high-severity security issues identified in the project audit were fixed:
 
-1. **API Key Authentication**: Optional API key authentication protects all `/api/*` endpoints (except `/api/version`). When `READER_API_KEY` env var is set, requests must include `X-API-Key` header. Empty key disables auth for backward compatibility.
+1. **Password-Based Authentication**: Password authentication with long-lived tokens protects all `/api/*` endpoints. When `READER_PASSWORD` env var is set, users must login via `/api/auth/login` to receive a token valid for 90 days (configurable via `READER_TOKEN_EXPIRY_DAYS`). Token is stored in browser localStorage (PWA) or SharedPreferences (e-ink client).
 
 2. **File Upload Size Limits**: All file upload endpoints (`/api/books/import`, `/api/backup/restore`) now enforce a configurable size limit (default 200MB, set via `READER_MAX_UPLOAD_SIZE_MB`). Source import lists are capped at 3000 items. Returns HTTP 413 with clear error message when exceeded.
 
@@ -27,14 +27,16 @@ Four critical/high-severity security issues identified in the project audit were
 ### Authentication Flow
 
 ```
-Request → enforce_api_auth middleware → X-API-Key header check → Route handler
-                                                    ↓ (no key configured)
-                                              Skip auth (backward compatible)
+First visit → LoginDialog → POST /api/auth/login → Token saved to localStorage
+                                                          ↓
+Subsequent visits → Authorization: Bearer <token> → enforce_api_auth → Route handler
+                                                          ↓ (no password configured)
+                                                    Skip auth
 ```
 
 - Middleware in `backend/main.py` intercepts all `/api/*` requests
-- Config in `backend/config.py` via `READER_API_KEY` env var
-- Frontend in `frontend/src/api/client.ts` sends header from `localStorage("reader-api-key")`
+- Config in `backend/config.py` via `READER_PASSWORD` env var
+- Token stored in `localStorage("reader-auth-token")` on PWA
 
 ### Upload Guard
 
@@ -69,7 +71,7 @@ _record_source_success/failure() → OrderedDict → _evict_source_health()
 
 ### Design Decisions
 
-- **Optional auth**: Empty `READER_API_KEY` disables auth, preserving backward compatibility for existing deployments
+- **Password-based auth**: Simple password login with long-lived tokens (90 days) for personal use
 - **Middleware-based auth**: Applied globally to all routes rather than per-route dependencies, ensuring no endpoints are accidentally unprotected
 - **Lazy import in upload_guard**: Settings imported at call time to support test monkeypatching
 - **OrderedDict for LRU**: Chosen over custom LRU class for simplicity and stdlib availability
@@ -79,11 +81,11 @@ _record_source_success/failure() → OrderedDict → _evict_source_health()
 ### Enable Authentication
 
 ```bash
-# Set API key
-export READER_API_KEY="your-secret-key"
+# Set password (required for auth)
+export READER_PASSWORD="your-secret-password"
 
-# Frontend: store key in browser
-localStorage.setItem("reader-api-key", "your-secret-key")
+# Optional: Set token expiry (default 90 days)
+export READER_TOKEN_EXPIRY_DAYS=90
 ```
 
 ### Configure Upload Limits
@@ -100,11 +102,12 @@ export READER_MAX_UPLOAD_SIZE_MB=500
 export READER_CORS_ORIGINS="http://localhost:5173,https://myapp.example.com"
 ```
 
-### All New Environment Variables
+### All Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `READER_API_KEY` | `""` | API key for authentication (empty = disabled) |
+| `READER_PASSWORD` | `""` | Login password (empty = disabled) |
+| `READER_TOKEN_EXPIRY_DAYS` | `90` | Token validity in days |
 | `READER_MAX_UPLOAD_SIZE_MB` | `200` | Max file upload size in MB |
 | `READER_CORS_ORIGINS` | `"*"` | Comma-separated allowed origins |
 
@@ -114,7 +117,7 @@ export READER_CORS_ORIGINS="http://localhost:5173,https://myapp.example.com"
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
-| `tests/test_auth.py` | 5 | Auth middleware, key validation, version bypass |
+| `tests/test_auth.py` | 4 | Auth middleware, token validation, version bypass |
 | `tests/test_upload_limits.py` | 4 | File size limits, list length caps |
 | `tests/test_cors.py` | 5 | CORS config property parsing |
 | `tests/test_search_health_leak.py` | 4 | LRU eviction, cap enforcement |
@@ -126,3 +129,4 @@ All 25 tests (18 new + 7 existing regression) pass.
 - [lesson] Monkeypatching `backend.config.settings` doesn't affect modules that did `from backend.config import settings` at import time — must monkeypatch the consuming module's binding instead
 - [lesson] CORS middleware is configured at app startup; cannot be changed via monkeypatch in tests — test the config property instead
 - [pivot] Upload guard uses lazy import (`_get_settings()`) to enable test monkeypatching of settings
+- [pivot] Simplified auth: removed API Key mechanism in favor of password-based token auth only
