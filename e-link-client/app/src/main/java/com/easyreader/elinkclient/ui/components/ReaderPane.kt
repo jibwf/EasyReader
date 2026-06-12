@@ -150,18 +150,11 @@ fun ReaderPane(
     }
     val readerTextColor = MaterialTheme.colorScheme.onBackground.toArgb()
     val clockFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA) }
-    var currentDateTimeLabel by remember { mutableStateOf(clockFormatter.format(Date())) }
+    val currentDateTimeLabel = remember { clockFormatter.format(Date()) }
     val chapterTitleLabel = if (state.activeChapterTitle.isBlank()) {
         chapterIndicator
     } else {
         "$chapterIndicator · ${state.activeChapterTitle}"
-    }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            currentDateTimeLabel = clockFormatter.format(Date())
-            delay(60_000L)
-        }
     }
 
     fun calculateReadingPosition(scrollView: ScrollView, textView: TextView): Double {
