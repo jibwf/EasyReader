@@ -208,47 +208,84 @@ docker run --rm -p 8080:8080 -v $(pwd)/data:/app/data easyreader
 
 当前核心 API 包括：
 
-- `GET /api/version`：服务端版本、API 契约版本和支持的客户端类型。
+### 认证
+- `POST /api/auth/login`：密码登录，返回 Token。
+- `GET /api/auth/verify`：验证 Token 有效性。
+
+### 书源管理
+- `POST /api/sources/import`：导入书源（JSON 数组）。
+- `POST /api/sources/import-url`：从 URL 导入书源。
+- `GET /api/sources`：获取书源列表。
+- `GET /api/sources/groups`：获取书源分组。
+- `PUT /api/sources/{url}/toggle`：启用/禁用书源。
+- `DELETE /api/sources/{url}`：删除书源。
+
+### 搜索与内容
+- `GET /api/search`：多源搜索（支持 SSE 流式）。
+- `GET /api/content/book-info`：获取书籍详情。
+- `GET /api/content/chapters`：获取目录。
+- `GET /api/content/chapter`：获取章节正文。
+
+### 书架管理
 - `GET /api/books`：获取书架列表。
-- `POST /api/books/import`：导入 `JSON`、`TXT` 或 `EPUB`。
+- `POST /api/books`：添加书籍到书架。
+- `DELETE /api/books/{id}`：删除书籍。
 - `POST /api/books/delete-batch`：批量删除书籍。
+- `POST /api/books/import`：导入 `JSON`、`TXT` 或 `EPUB`。
 - `POST /api/books/cache-batch`：批量预缓存章节。
 - `POST /api/books/export-batch`：批量导出书籍。
 - `GET /api/books/cache/stats`：查看服务端缓存统计。
 - `POST /api/books/cache/clear`：清理服务端缓存。
 - `GET /api/books/exports/{file_name}`：下载导出文件。
-- `GET /api/content/book-info`：获取书籍详情。
-- `GET /api/content/chapters`：获取目录。
-- `GET /api/content/chapter`：获取章节正文。
-- `POST /api/progress` / `GET /api/progress`：兼容旧版阅读进度。
+
+### 分类管理
+- `GET /api/books/categories`：获取分类列表。
+- `POST /api/books/categories`：创建分类。
+- `PUT /api/books/categories/{name}/hidden`：隐藏/显示分类。
+- `PUT /api/books/categories/{name}/rename`：重命名分类。
+- `DELETE /api/books/categories/{name}`：删除分类。
+- `PUT /api/books/{id}/category`：设置书籍分类。
+- `POST /api/books/category-batch`：批量设置书籍分类。
+
+### 同步与离线
 - `POST /api/sync/progress/upsert` / `GET /api/sync/progress/pull`：多端进度同步。
 - `POST /api/sync/bookmarks/batch` / `GET /api/sync/bookmarks/pull`：书签同步。
-- `POST /api/offline/tasks` / `GET /api/offline/tasks` / `GET /api/offline/catalog`：离线任务与离线目录。
+- `POST /api/offline/tasks`：创建离线任务。
+- `GET /api/offline/tasks`：获取任务列表。
+- `GET /api/offline/catalog`：获取离线目录。
+
+### 其他
+- `GET /api/version`：服务端版本信息。
 - `GET /api/fonts`：获取服务器字体列表。
-- `GET /api/fonts/{font_file_name}/download`：下载服务器字体文件。
+- `GET /api/fonts/{file_name}/download`：下载服务器字体文件。
 - `GET /api/backup/export`：下载服务端备份 ZIP。
 - `POST /api/backup/restore`：上传备份 ZIP 并执行全量/增量恢复。
+- `GET /api/proxy/image`：图片代理。
 
 ## 当前状态
 
-已经完成的重点能力：
+### 第一阶段已完成
 
-- 服务端资源身份、搜索排序、源健康度、同步幂等和离线任务层重构。
-- 书架内一体化书籍管理，以及本地 `TXT` / `EPUB` 导入阅读。
-- Web PWA 的 IndexedDB + Workbox 双层缓存、`fast/full` 搜索、自动翻页和冲突处理。
-- 多端进度同步、书签同步、后台离线任务与离线目录 API。
-- 墨水屏 Android 客户端的 `book_key` 基线、本地缓存阅读、WiFi 闸门和离线任务接入。
-- 关键后端回归测试覆盖。
+- ✅ 服务端核心能力：书源解析、内容抓取、书架管理、章节缓存
+- ✅ 认证系统：密码认证 + 长期 Token（90天有效）
+- ✅ 多端同步：进度同步、书签同步、离线任务
+- ✅ Web PWA：IndexedDB + Workbox 双层缓存、`fast/full` 搜索、自动翻页
+- ✅ 安全加固：文件上传限制、CORS 配置、内存泄漏修复
+- ✅ 后端测试：110 个测试用例覆盖核心功能
+- ✅ 墨水屏客户端：`book_key` 基线、本地缓存阅读、WiFi 闸门和离线任务接入
 
-当前阶段主线：
+### 第二阶段待开发
 
-- 墨水屏客户端补齐请求头、同步冲突处理和显式离线任务状态机。
-- 阅读器设备交互收口，包括实体按键、缺章入口和刷新策略协同。
-- 有声书 / 音频任务能力仍放在墨水屏客户端收口之后。
+- 🔲 有声书 / 音频任务能力
+- 🔲 墨水屏客户端补齐请求头、同步冲突处理和显式离线任务状态机
+- 🔲 阅读器设备交互收口，包括实体按键、缺章入口和刷新策略协同
+- 🔲 前端测试覆盖
+- 🔲 速率限制中间件
+- 🔲 SSRF 防护
 
 ## 当前限制
 
-- 还没有统一账号 / 鉴权系统；当前 `user_id` 与 `device_id` 仍由客户端自管。
+- ✅ ~~还没有统一账号 / 鉴权系统~~ → 已实现密码认证
 - 还没有有声书 / 音频任务能力。
 - Android 墨水屏客户端还没有完全补齐请求头、同步冲突语义和显式任务 UI。
 - Web PWA 是在线优先 + 本地缓存增强客户端，不能直接等同于墨水屏客户端策略。
