@@ -1818,23 +1818,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         _state.update {
-            val emptyChunk = computeChunkState("", normalizedRestorePosition)
             it.copy(
                 isLoading = true,
                 errorMessage = null,
-                activeChapterListIndex = chapterListIndex,
-                activeChapterCached = chapter.isCached,
-                activeChapterTitle = chapter.title,
-                activeChapterPosition = normalizedRestorePosition,
-                activeChapterScrollPosition = emptyChunk.chunkPosition,
-                chapterRenderChunkIndex = emptyChunk.chunkIndex,
-                chapterRenderChunkCount = emptyChunk.chunkCount,
-                chapterRenderChunkStart = emptyChunk.chunkStart,
-                chapterRenderChunkEnd = emptyChunk.chunkEnd,
-                chapterRenderTotalChars = emptyChunk.totalChars,
-                chapterRestoreToken = it.chapterRestoreToken + 1,
-                chapterImages = emptyList(),
-                chapterText = "章节加载中...",
             )
         }
 
@@ -1860,7 +1846,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        activeChapterListIndex = chapterListIndex,
                         activeChapterCached = false,
+                        activeChapterTitle = chapter.title,
                         chapters = it.chapters.mapIndexed { index, chapterItem ->
                             if (index == chapterListIndex) chapterItem.copy(isCached = false) else chapterItem
                         },
@@ -1873,6 +1861,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         chapterRenderChunkStart = 0,
                         chapterRenderChunkEnd = 0,
                         chapterRenderTotalChars = 0,
+                        chapterRestoreToken = it.chapterRestoreToken + 1,
                         chapterText = "本章未缓存。WiFi 关闭时不会自动联网；请在书架中选择更新本地缓存。",
                         localCacheStatusMessage = "${activeBook.name}: 第 ${chapter.idx + 1} 章未缓存",
                     )
@@ -1894,7 +1883,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        activeChapterListIndex = chapterListIndex,
                         activeChapterCached = true,
+                        activeChapterTitle = chapter.title,
                         chapters = it.chapters.mapIndexed { index, chapterItem ->
                             if (index == chapterListIndex) chapterItem.copy(isCached = true) else chapterItem
                         },
@@ -1905,6 +1896,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         chapterRenderChunkStart = 0,
                         chapterRenderChunkEnd = 0,
                         chapterRenderTotalChars = 0,
+                        chapterRestoreToken = it.chapterRestoreToken + 1,
                         chapterType = "manga",
                         chapterImages = content.images,
                         chapterText = buildMangaPlaceholder(content.images),
@@ -1916,7 +1908,9 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         isLoading = false,
+                        activeChapterListIndex = chapterListIndex,
                         activeChapterCached = true,
+                        activeChapterTitle = chapter.title,
                         chapters = it.chapters.mapIndexed { index, chapterItem ->
                             if (index == chapterListIndex) chapterItem.copy(isCached = true) else chapterItem
                         },
@@ -1927,6 +1921,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                         chapterRenderChunkStart = chunk.chunkStart,
                         chapterRenderChunkEnd = chunk.chunkEnd,
                         chapterRenderTotalChars = chunk.totalChars,
+                        chapterRestoreToken = it.chapterRestoreToken + 1,
                         chapterType = "novel",
                         chapterImages = emptyList(),
                         chapterText = chunk.chunkText,

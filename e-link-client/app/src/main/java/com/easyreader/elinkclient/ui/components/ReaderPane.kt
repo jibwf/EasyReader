@@ -35,6 +35,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.easyreader.elinkclient.core.EinkDeviceRefreshBridge
@@ -44,6 +46,9 @@ import com.easyreader.elinkclient.ui.EinkUiState
 import com.easyreader.elinkclient.ui.ReaderHardwareAction
 import com.easyreader.elinkclient.ui.ReaderFontStyle
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -144,6 +149,20 @@ fun ReaderPane(
         }
     }
     val readerTextColor = MaterialTheme.colorScheme.onBackground.toArgb()
+    val clockFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA) }
+    var currentDateTimeLabel by remember { mutableStateOf(clockFormatter.format(Date())) }
+    val chapterTitleLabel = if (state.activeChapterTitle.isBlank()) {
+        chapterIndicator
+    } else {
+        "$chapterIndicator · ${state.activeChapterTitle}"
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentDateTimeLabel = clockFormatter.format(Date())
+            delay(60_000L)
+        }
+    }
 
     fun calculateReadingPosition(scrollView: ScrollView, textView: TextView): Double {
         val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
@@ -166,6 +185,9 @@ fun ReaderPane(
     }
 
     fun turnPage(forward: Boolean) {
+        if (state.isLoading) {
+            return
+        }
         val scrollView = readerScrollView ?: return
         val textView = scrollView.getChildAt(0) as? TextView ?: return
         val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
@@ -253,9 +275,31 @@ fun ReaderPane(
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = state.activeBookName.ifBlank { "EasyReader" },
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = currentDateTimeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+
             Box(
                 modifier = Modifier
-                    .fillMaxSize(),
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(vertical = 4.dp),
             ) {
                 if (!state.activeChapterCached) {
                     EinkCard(
@@ -394,6 +438,39 @@ fun ReaderPane(
                             }
                         }
                     }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onToggleAutoTurn,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        if (state.autoPageTurnEnabled) {
+                            "自动翻页中"
+                        } else {
+                            "自动翻页"
+                        }
+                    )
+                }
+                Text(
+                    text = chapterTitleLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(2f),
+                )
+                OutlinedButton(
+                    onClick = onExitReader,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("退出阅读")
                 }
             }
         }
