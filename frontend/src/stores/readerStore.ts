@@ -5,7 +5,7 @@ export type ReaderTheme = "light" | "sepia" | "mint" | "blue" | "gray" | "night"
 export type NormalizedReaderTheme = Exclude<ReaderTheme, "dark">;
 
 export const AUTO_PAGE_TURN_INTERVAL_MS_MIN = 5000;
-export const AUTO_PAGE_TURN_INTERVAL_MS_MAX = 30000;
+export const AUTO_PAGE_TURN_INTERVAL_MS_MAX = 60000;
 export const AUTO_PAGE_TURN_INTERVAL_MS_STEP = 500;
 
 export function getDefaultAutoPageTurnIntervalMs(): number {

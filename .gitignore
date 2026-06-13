@@ -11,3 +11,4 @@ frontend/dist/
 tests/fixtures/replays/
 *.egg-info/
 .pytest_cache/
+.DS_Store
