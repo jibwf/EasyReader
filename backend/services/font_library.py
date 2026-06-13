@@ -14,6 +14,15 @@ FONT_MEDIA_TYPES = {
     ".woff2": "font/woff2",
 }
 
+FONT_DISPLAY_NAMES = {
+    "notosanscjksc-regular": "思源黑体（Noto Sans CJK SC）",
+    "notosanscjksc-bold": "思源黑体粗体（Noto Sans CJK SC Bold）",
+    "notoserifcjksc-regular": "思源宋体（Noto Serif CJK SC）",
+    "notoserifcjksc-bold": "思源宋体粗体（Noto Serif CJK SC Bold）",
+    "lxgwwenkai-regular": "霞鹜文楷（LXGW WenKai）",
+    "canglesongw05-regular": "仓耳与墨 W05",
+}
+
 
 def ensure_font_dir() -> Path:
     font_dir = settings.font_dir
@@ -33,6 +42,10 @@ def _is_supported_font(file_path: Path) -> bool:
     return file_path.suffix.lower() in SUPPORTED_FONT_EXTENSIONS
 
 
+def _get_font_display_name(stem: str) -> str:
+    return FONT_DISPLAY_NAMES.get(stem.lower(), stem)
+
+
 def list_server_fonts() -> list[dict]:
     font_dir = ensure_font_dir().resolve()
     items: list[dict] = []
@@ -45,7 +58,7 @@ def list_server_fonts() -> list[dict]:
         items.append(
             {
                 "id": file_path.stem,
-                "name": file_path.stem,
+                "name": _get_font_display_name(file_path.stem),
                 "file_name": file_path.name,
                 "extension": extension,
                 "size_bytes": file_path.stat().st_size,
