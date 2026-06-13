@@ -291,6 +291,67 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun createCategory(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            try {
+                repository.createBookCategory(name)
+                _state.update { it.copy(categoryMessage = "已创建分类: $name") }
+                refreshCategories()
+            } catch (e: Exception) {
+                _state.update { it.copy(categoryMessage = "创建分类失败: ${e.message}") }
+            }
+        }
+    }
+
+    fun toggleCategoryHidden(categoryName: String, hidden: Boolean) {
+        viewModelScope.launch {
+            try {
+                repository.toggleCategoryHidden(categoryName, hidden)
+                _state.update { it.copy(categoryMessage = if (hidden) "已隐藏分类: $categoryName" else "已取消隐藏: $categoryName") }
+                refreshCategories()
+            } catch (e: Exception) {
+                _state.update { it.copy(categoryMessage = "操作失败: ${e.message}") }
+            }
+        }
+    }
+
+    fun renameCategory(oldName: String, newName: String) {
+        if (oldName.isBlank() || newName.isBlank()) return
+        viewModelScope.launch {
+            try {
+                repository.renameBookCategory(oldName, newName)
+                _state.update { it.copy(categoryMessage = "已重命名: $oldName -> $newName") }
+                refreshCategories()
+            } catch (e: Exception) {
+                _state.update { it.copy(categoryMessage = "重命名失败: ${e.message}") }
+            }
+        }
+    }
+
+    fun deleteCategory(categoryName: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteBookCategory(categoryName)
+                _state.update { it.copy(categoryMessage = "已删除分类: $categoryName") }
+                refreshCategories()
+            } catch (e: Exception) {
+                _state.update { it.copy(categoryMessage = "删除失败: ${e.message}") }
+            }
+        }
+    }
+
+    private fun refreshCategories() {
+        viewModelScope.launch {
+            try {
+                val categories = repository.getBookCategories()
+                _state.update { it.copy(bookCategories = categories) }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
     fun cycleSyncMode() {
         val next = when (_state.value.syncMode) {
             SyncMode.MANUAL_PROGRESS_ONLY -> SyncMode.AUTO_ON_WIFI

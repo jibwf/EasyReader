@@ -7,7 +7,10 @@ import com.easyreader.elinkclient.core.NetworkGate
 import com.easyreader.elinkclient.data.local.LocalCacheStore
 import com.easyreader.elinkclient.data.model.BookCreateRequest
 import com.easyreader.elinkclient.data.model.BookCategoryAssignRequest
+import com.easyreader.elinkclient.data.model.BookCategoryCreateRequest
+import com.easyreader.elinkclient.data.model.BookCategoryHiddenRequest
 import com.easyreader.elinkclient.data.model.BookCategoryItem
+import com.easyreader.elinkclient.data.model.BookCategoryRenameRequest
 import com.easyreader.elinkclient.data.model.BookItem
 import com.easyreader.elinkclient.data.model.CacheClearRequest
 import com.easyreader.elinkclient.data.model.CacheClearResponse
@@ -181,6 +184,26 @@ class ReaderRepository(
     suspend fun getBookCategories(): List<BookCategoryItem> = withContext(Dispatchers.IO) {
         networkGate.requireWifiOnline("拉取服务器分类")
         api.getBookCategories()
+    }
+
+    suspend fun createBookCategory(name: String): BookCategoryItem = withContext(Dispatchers.IO) {
+        networkGate.requireWifiOnline("创建分类")
+        api.createBookCategory(BookCategoryCreateRequest(name = name))
+    }
+
+    suspend fun toggleCategoryHidden(categoryName: String, hidden: Boolean) = withContext(Dispatchers.IO) {
+        networkGate.requireWifiOnline("切换分类隐藏状态")
+        api.toggleCategoryHidden(categoryName, BookCategoryHiddenRequest(hidden = hidden))
+    }
+
+    suspend fun renameBookCategory(categoryName: String, newName: String) = withContext(Dispatchers.IO) {
+        networkGate.requireWifiOnline("重命名分类")
+        api.renameBookCategory(categoryName, BookCategoryRenameRequest(newName = newName))
+    }
+
+    suspend fun deleteBookCategory(categoryName: String) = withContext(Dispatchers.IO) {
+        networkGate.requireWifiOnline("删除分类")
+        api.deleteBookCategory(categoryName)
     }
 
     suspend fun setBookCategory(bookId: Int, categoryName: String) = withContext(Dispatchers.IO) {

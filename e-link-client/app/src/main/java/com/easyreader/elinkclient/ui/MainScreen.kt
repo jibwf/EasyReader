@@ -344,6 +344,9 @@ fun MainScreen(viewModel: EinkViewModel) {
                             onClearError = viewModel::clearError,
                             onLogin = viewModel::loginWithPassword,
                             onLogout = viewModel::logout,
+                            onCreateCategory = viewModel::createCategory,
+                            onToggleCategoryHidden = viewModel::toggleCategoryHidden,
+                            onDeleteCategory = viewModel::deleteCategory,
                         )
                     }
                 }

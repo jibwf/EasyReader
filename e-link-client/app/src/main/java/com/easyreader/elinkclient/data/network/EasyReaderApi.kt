@@ -2,7 +2,10 @@ package com.easyreader.elinkclient.data.network
 
 import com.easyreader.elinkclient.data.model.BookItem
 import com.easyreader.elinkclient.data.model.BookCategoryAssignRequest
+import com.easyreader.elinkclient.data.model.BookCategoryCreateRequest
+import com.easyreader.elinkclient.data.model.BookCategoryHiddenRequest
 import com.easyreader.elinkclient.data.model.BookCategoryItem
+import com.easyreader.elinkclient.data.model.BookCategoryRenameRequest
 import com.easyreader.elinkclient.data.model.BookCreateRequest
 import com.easyreader.elinkclient.data.model.CacheClearRequest
 import com.easyreader.elinkclient.data.model.CacheClearResponse
@@ -21,6 +24,7 @@ import com.easyreader.elinkclient.data.model.SyncPullResponse
 import com.easyreader.elinkclient.data.model.VerifyResponse
 import okhttp3.ResponseBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -45,6 +49,28 @@ interface EasyReaderApi {
 
     @GET("api/books/categories")
     suspend fun getBookCategories(): List<BookCategoryItem>
+
+    @POST("api/books/categories")
+    suspend fun createBookCategory(
+        @Body payload: BookCategoryCreateRequest,
+    ): BookCategoryItem
+
+    @PUT("api/books/categories/{category_name}/hidden")
+    suspend fun toggleCategoryHidden(
+        @Path("category_name") categoryName: String,
+        @Body payload: BookCategoryHiddenRequest,
+    ): Map<String, Any>
+
+    @PUT("api/books/categories/{category_name}/rename")
+    suspend fun renameBookCategory(
+        @Path("category_name") categoryName: String,
+        @Body payload: BookCategoryRenameRequest,
+    ): Map<String, String>
+
+    @DELETE("api/books/categories/{category_name}")
+    suspend fun deleteBookCategory(
+        @Path("category_name") categoryName: String,
+    ): Map<String, Any>
 
     @PUT("api/books/{book_id}/category")
     suspend fun setBookCategory(

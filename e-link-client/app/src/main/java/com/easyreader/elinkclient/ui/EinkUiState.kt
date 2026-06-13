@@ -167,4 +167,5 @@ data class EinkUiState(
     val refreshSignal: Long = 0L,
     val authToken: String = "",
     val authMessage: String = "",
+    val categoryMessage: String = "",
 )

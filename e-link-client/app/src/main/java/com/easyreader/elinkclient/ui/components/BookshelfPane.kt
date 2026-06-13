@@ -47,7 +47,7 @@ fun BookshelfPane(
     var selectedServerBook by remember { mutableStateOf<BookItem?>(null) }
 
     val categoryItems = remember(state.bookCategories) {
-        listOf("all") + state.bookCategories.map { it.name }
+        listOf("all") + state.bookCategories.filter { !it.hidden }.map { it.name }
     }
     val visibleServerBooks = remember(state.serverBooks, state.selectedCategory) {
         if (state.selectedCategory == "all") {

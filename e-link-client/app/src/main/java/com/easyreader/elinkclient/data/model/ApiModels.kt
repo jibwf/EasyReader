@@ -23,6 +23,18 @@ data class BookCategoryItem(
     @Json(name = "book_count") val bookCount: Int,
 )
 
+data class BookCategoryCreateRequest(
+    val name: String,
+)
+
+data class BookCategoryHiddenRequest(
+    val hidden: Boolean,
+)
+
+data class BookCategoryRenameRequest(
+    @Json(name = "new_name") val newName: String,
+)
+
 data class BookCategoryAssignRequest(
     @Json(name = "category_name") val categoryName: String,
 )

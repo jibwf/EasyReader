@@ -45,6 +45,9 @@ fun SettingsPane(
     onClearError: () -> Unit,
     onLogin: (String) -> Unit,
     onLogout: () -> Unit,
+    onCreateCategory: (String) -> Unit,
+    onToggleCategoryHidden: (String, Boolean) -> Unit,
+    onDeleteCategory: (String) -> Unit,
 ) {
     var editableBaseUrl by remember { mutableStateOf(state.baseUrl) }
     var editableUserId by remember { mutableStateOf(state.userId) }
@@ -177,6 +180,96 @@ fun SettingsPane(
                 }
             }
         }
+        }
+
+        item {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "分类管理",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+
+                    var newCategoryName by remember { mutableStateOf("") }
+
+                    OutlinedTextField(
+                        value = newCategoryName,
+                        onValueChange = { newCategoryName = it },
+                        label = { Text("输入新分类名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    EinkButton(
+                        onClick = {
+                            if (newCategoryName.isNotBlank()) {
+                                onCreateCategory(newCategoryName)
+                                newCategoryName = ""
+                            }
+                        },
+                        enabled = newCategoryName.isNotBlank() && state.isNetworkAvailable,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp),
+                    ) {
+                        Text("新增分类")
+                    }
+
+                    if (state.bookCategories.isEmpty()) {
+                        Text(
+                            text = "暂无分类",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        state.bookCategories.forEach { category ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${category.name}${if (category.preset) "（预设）" else ""}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        text = "${category.bookCount} 本${if (category.hidden) " · 已隐藏" else ""}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    OutlinedButton(
+                                        onClick = { onToggleCategoryHidden(category.name, !category.hidden) },
+                                        enabled = state.isNetworkAvailable,
+                                    ) {
+                                        Text(if (category.hidden) "显示" else "隐藏")
+                                    }
+                                    if (!category.preset) {
+                                        OutlinedButton(
+                                            onClick = { onDeleteCategory(category.name) },
+                                            enabled = state.isNetworkAvailable,
+                                        ) {
+                                            Text("删除")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (state.categoryMessage.isNotBlank()) {
+                        Text(
+                            text = state.categoryMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
         }
 
         item {
