@@ -308,8 +308,19 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 repository.toggleCategoryHidden(categoryName, hidden)
-                _state.update { it.copy(categoryMessage = if (hidden) "已隐藏分类: $categoryName" else "已取消隐藏: $categoryName") }
-                refreshCategories()
+                _state.update { state ->
+                    val updatedCategories = state.bookCategories.map { category ->
+                        if (category.name == categoryName) {
+                            category.copy(hidden = hidden)
+                        } else {
+                            category
+                        }
+                    }
+                    state.copy(
+                        bookCategories = updatedCategories,
+                        categoryMessage = if (hidden) "已隐藏分类: $categoryName" else "已取消隐藏: $categoryName",
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(categoryMessage = "操作失败: ${e.message}") }
             }
