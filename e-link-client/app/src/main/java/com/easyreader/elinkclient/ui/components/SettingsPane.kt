@@ -656,38 +656,18 @@ fun SettingsPane(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
-                    text = "Sync Cursor: ${state.syncCursor}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text = "Last Sync Revision: ${state.lastSyncRevision}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
                     text = "状态: ${state.lastSyncMessage}",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (state.offlineTaskStatusMessage.isNotBlank()) {
-                    Text(
-                        text = "任务: ${state.offlineTaskStatusMessage}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                if (state.localCacheStatusMessage.isNotBlank()) {
-                    Text(
-                        text = "缓存: ${state.localCacheStatusMessage}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
                 state.activeOfflineTask?.let { task ->
                     Text(
-                        text = "当前服务器任务: ${task.bookName} · ${task.status} ${task.progress}%",
+                        text = "任务: ${task.bookName} · ${task.status} ${task.progress}%",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 state.activeLocalCache?.let { cache ->
                     Text(
-                        text = "当前本地落盘: ${cache.bookName} · ${cache.cachedChapters}/${cache.totalChapters} · 失败 ${cache.failedChapters}",
+                        text = "缓存: ${cache.bookName} · ${cache.cachedChapters}/${cache.totalChapters}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
