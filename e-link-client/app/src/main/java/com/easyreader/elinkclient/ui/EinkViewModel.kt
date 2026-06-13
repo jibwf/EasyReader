@@ -2884,9 +2884,11 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             .filter { path -> path.substringAfterLast('/').lowercase() !in remoteFileNames }
             .map { path ->
                 val filename = path.substringAfterLast('/')
+                val fontName = filename.substringBeforeLast('.')
+                    .replace(Regex("[_-]"), " ")
                 ReaderFontOption(
                     key = "local:$filename",
-                    name = filename.substringBeforeLast('.'),
+                    name = fontName,
                     fromServer = false,
                     downloaded = true,
                     filePath = path,
