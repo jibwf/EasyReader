@@ -97,48 +97,7 @@ fun SettingsPane(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                Text(
-                    text = "设备 ID: ${state.deviceId}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    EinkButton(
-                        onClick = { onApplyConfig(editableBaseUrl, editableUserId) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(42.dp),
-                    ) {
-                        Text("保存配置")
-                    }
-                    OutlinedButton(
-                        onClick = onRefreshCacheStats,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(42.dp),
-                    ) {
-                        Text("刷新缓存统计")
-                    }
-                }
-
-                if (state.authToken.isNotBlank()) {
-                    Text(
-                        text = "已登录",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    OutlinedButton(
-                        onClick = onLogout,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(40.dp),
-                    ) {
-                        Text("退出登录")
-                    }
-                } else {
+                if (state.authToken.isBlank()) {
                     OutlinedTextField(
                         value = editablePassword,
                         onValueChange = { editablePassword = it },
@@ -146,19 +105,67 @@ fun SettingsPane(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    EinkButton(
-                        onClick = {
-                            if (editablePassword.isNotBlank()) {
-                                onLogin(editablePassword)
-                                editablePassword = ""
-                            }
-                        },
-                        enabled = editablePassword.isNotBlank() && state.isNetworkAvailable,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp),
+                }
+
+                Text(
+                    text = "设备 ID: ${state.deviceId}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                if (state.authToken.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("登录")
+                        EinkButton(
+                            onClick = { onApplyConfig(editableBaseUrl, editableUserId) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp),
+                        ) {
+                            Text("保存配置")
+                        }
+                        OutlinedButton(
+                            onClick = onLogout,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp),
+                        ) {
+                            Text("退出登录")
+                        }
+                    }
+                    Text(
+                        text = "已登录",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        EinkButton(
+                            onClick = {
+                                if (editablePassword.isNotBlank()) {
+                                    onLogin(editablePassword)
+                                    editablePassword = ""
+                                }
+                            },
+                            enabled = editablePassword.isNotBlank() && state.isNetworkAvailable,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp),
+                        ) {
+                            Text("登录")
+                        }
+                        EinkButton(
+                            onClick = { onApplyConfig(editableBaseUrl, editableUserId) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp),
+                        ) {
+                            Text("保存配置")
+                        }
                     }
                 }
 
