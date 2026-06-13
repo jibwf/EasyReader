@@ -397,7 +397,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshBookCategories(showLoading: Boolean = false) {
         runRequest(
-            block = { repository.getBookCategories().filter { !it.hidden } },
+            block = { repository.getBookCategories() },
             onSuccess = { categories ->
                 _state.update { state ->
                     val selected = if (state.selectedCategory == "all") {
@@ -1610,7 +1610,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         val serverFonts = repository.getServerFonts()
         val localPaths = repository.listDownloadedFontFiles()
         val books = repository.getBooks()
-        val categories = repository.getBookCategories().filter { !it.hidden }
+        val categories = repository.getBookCategories()
         val serverCacheStats = repository.getServerCacheStats()
         val clientCacheStats = repository.getClientCacheStats()
 
