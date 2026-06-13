@@ -8,6 +8,8 @@ import com.easyreader.elinkclient.data.model.CacheClearRequest
 import com.easyreader.elinkclient.data.model.CacheClearResponse
 import com.easyreader.elinkclient.data.model.ChapterContent
 import com.easyreader.elinkclient.data.model.ChapterItem
+import com.easyreader.elinkclient.data.model.LoginRequest
+import com.easyreader.elinkclient.data.model.LoginResponse
 import com.easyreader.elinkclient.data.model.OfflineCatalogItem
 import com.easyreader.elinkclient.data.model.OfflineTaskCreateRequest
 import com.easyreader.elinkclient.data.model.OfflineTaskItem
@@ -16,6 +18,7 @@ import com.easyreader.elinkclient.data.model.ServerFontItem
 import com.easyreader.elinkclient.data.model.SyncProgressItem
 import com.easyreader.elinkclient.data.model.SyncProgressUpsertRequest
 import com.easyreader.elinkclient.data.model.SyncPullResponse
+import com.easyreader.elinkclient.data.model.VerifyResponse
 import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -27,6 +30,16 @@ import retrofit2.http.Streaming
 import retrofit2.http.Url
 
 interface EasyReaderApi {
+    @POST("api/auth/login")
+    suspend fun login(
+        @Body payload: LoginRequest,
+    ): LoginResponse
+
+    @GET("api/auth/verify")
+    suspend fun verifyToken(
+        @Query("token") token: String,
+    ): VerifyResponse
+
     @GET("api/books")
     suspend fun getBooks(): List<BookItem>
 

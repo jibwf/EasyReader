@@ -43,9 +43,12 @@ fun SettingsPane(
     onClearClientCache: () -> Unit,
     onCancelOfflineDownload: () -> Unit,
     onClearError: () -> Unit,
+    onLogin: (String) -> Unit,
+    onLogout: () -> Unit,
 ) {
     var editableBaseUrl by remember { mutableStateOf(state.baseUrl) }
     var editableUserId by remember { mutableStateOf(state.userId) }
+    var editablePassword by remember { mutableStateOf("") }
 
     LaunchedEffect(state.baseUrl, state.userId) {
         editableBaseUrl = state.baseUrl
@@ -122,6 +125,71 @@ fun SettingsPane(
                 }
             }
         }
+        }
+
+        item {
+            EinkCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "认证管理",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = "设置密码保护系统访问。登录后 Token 保存在本地，90 天内无需重新输入。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+
+                    if (state.authToken.isNotBlank()) {
+                        Text(
+                            text = "已登录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        OutlinedButton(
+                            onClick = onLogout,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp),
+                        ) {
+                            Text("退出登录")
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = editablePassword,
+                            onValueChange = { editablePassword = it },
+                            label = { Text("输入密码") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        EinkButton(
+                            onClick = {
+                                if (editablePassword.isNotBlank()) {
+                                    onLogin(editablePassword)
+                                    editablePassword = ""
+                                }
+                            },
+                            enabled = editablePassword.isNotBlank() && state.isNetworkAvailable,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp),
+                        ) {
+                            Text("登录")
+                        }
+                    }
+
+                    if (state.authMessage.isNotBlank()) {
+                        Text(
+                            text = state.authMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
         }
 
         item {

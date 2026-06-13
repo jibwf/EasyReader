@@ -165,4 +165,6 @@ data class EinkUiState(
     val readerCommandSignal: Long = 0L,
     val lastRefreshAction: RefreshAction = RefreshAction.NONE,
     val refreshSignal: Long = 0L,
+    val authToken: String = "",
+    val authMessage: String = "",
 )

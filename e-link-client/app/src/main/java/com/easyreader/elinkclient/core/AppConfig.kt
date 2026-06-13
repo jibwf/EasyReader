@@ -22,4 +22,5 @@ object AppConfig {
     const val KEY_LAST_ACTIVE_POSITION = "last_active_position"
     const val KEY_PENDING_PROGRESS_QUEUE = "pending_progress_queue"
     const val KEY_SYNC_POLICY = "sync_policy"
+    const val KEY_AUTH_TOKEN = "auth_token"
 }

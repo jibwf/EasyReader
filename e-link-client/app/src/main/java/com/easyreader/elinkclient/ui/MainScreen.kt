@@ -336,6 +336,8 @@ fun MainScreen(viewModel: EinkViewModel) {
                             onClearClientCache = viewModel::clearClientCache,
                             onCancelOfflineDownload = viewModel::cancelOfflineDownload,
                             onClearError = viewModel::clearError,
+                            onLogin = viewModel::loginWithPassword,
+                            onLogout = viewModel::logout,
                         )
                     }
                 }

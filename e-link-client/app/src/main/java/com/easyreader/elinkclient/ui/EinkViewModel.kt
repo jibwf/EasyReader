@@ -155,6 +155,7 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         )
         wifiMonitor.start()
         observeWifiConnectivity()
+        checkAuthState()
     }
 
     override fun onCleared() {
@@ -227,6 +228,60 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
         refreshCacheStats(showLoading = false)
         if (networkGate.canUseNetwork()) {
             scheduleWifiFullSync("配置更新")
+        }
+    }
+
+    fun loginWithPassword(password: String) {
+        if (password.isBlank()) return
+        viewModelScope.launch {
+            _state.update { it.copy(authMessage = "登录中...") }
+            try {
+                val response = repository.login(password, android.os.Build.MODEL)
+                val token = response.token
+                prefs.edit().putString(AppConfig.KEY_AUTH_TOKEN, token).apply()
+                com.easyreader.elinkclient.data.network.NetworkModule.setAuthToken(token)
+                _state.update {
+                    it.copy(
+                        authToken = token,
+                        authMessage = "登录成功，${response.expiresInDays} 天内无需重新输入",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(authMessage = "登录失败: ${e.message ?: "未知错误"}")
+                }
+            }
+        }
+    }
+
+    fun logout() {
+        prefs.edit().remove(AppConfig.KEY_AUTH_TOKEN).apply()
+        com.easyreader.elinkclient.data.network.NetworkModule.setAuthToken("")
+        _state.update {
+            it.copy(
+                authToken = "",
+                authMessage = "已退出登录",
+            )
+        }
+    }
+
+    fun checkAuthState() {
+        val savedToken = prefs.getString(AppConfig.KEY_AUTH_TOKEN, null)
+        if (savedToken.isNullOrBlank()) return
+        com.easyreader.elinkclient.data.network.NetworkModule.setAuthToken(savedToken)
+        viewModelScope.launch {
+            try {
+                val valid = repository.verifyToken(savedToken)
+                if (valid) {
+                    _state.update { it.copy(authToken = savedToken) }
+                } else {
+                    prefs.edit().remove(AppConfig.KEY_AUTH_TOKEN).apply()
+                    com.easyreader.elinkclient.data.network.NetworkModule.setAuthToken("")
+                    _state.update { it.copy(authToken = "", authMessage = "Token 已过期，请重新登录") }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(authToken = savedToken) }
+            }
         }
     }
 

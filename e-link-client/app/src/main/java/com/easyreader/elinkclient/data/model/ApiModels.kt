@@ -227,3 +227,17 @@ data class OfflineCatalogItem(
     @Json(name = "cached_chapters") val cachedChapters: Int,
     @Json(name = "updated_at") val updatedAt: String,
 )
+
+data class LoginRequest(
+    val password: String,
+    @Json(name = "device_name") val deviceName: String = "",
+)
+
+data class LoginResponse(
+    val token: String,
+    @Json(name = "expires_in_days") val expiresInDays: Int,
+)
+
+data class VerifyResponse(
+    val valid: Boolean,
+)

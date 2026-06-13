@@ -17,6 +17,15 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 object NetworkModule {
+    @Volatile
+    private var authToken: String = ""
+
+    fun setAuthToken(token: String) {
+        authToken = token
+    }
+
+    fun getAuthToken(): String = authToken
+
     fun createHttpClient(context: Context, networkGate: NetworkGate): OkHttpClient {
         val clientVersion = resolveClientVersion(context)
         val cacheSizeBytes = 10L * 1024L * 1024L
@@ -29,12 +38,15 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val request = chain.request()
                 networkGate.requireWifiOnline("${request.method} ${request.url.encodedPath}")
-                val clientRequest = request.newBuilder()
+                val builder = request.newBuilder()
                     .header("X-Client-Type", AppConfig.CLIENT_TYPE)
                     .header("X-Client-Version", clientVersion)
                     .header("X-API-Contract-Version", AppConfig.API_CONTRACT_VERSION)
-                    .build()
-                chain.proceed(clientRequest)
+                val token = authToken
+                if (token.isNotBlank()) {
+                    builder.header("Authorization", "Bearer $token")
+                }
+                chain.proceed(builder.build())
             }
             .dispatcher(dispatcher)
             .connectionPool(

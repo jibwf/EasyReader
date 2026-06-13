@@ -20,6 +20,8 @@ import com.easyreader.elinkclient.data.model.OfflineCatalogItem
 import com.easyreader.elinkclient.data.model.OfflineTaskCreateRequest
 import com.easyreader.elinkclient.data.model.OfflineTaskItem
 import com.easyreader.elinkclient.data.model.SearchResultItem
+import com.easyreader.elinkclient.data.model.LoginRequest
+import com.easyreader.elinkclient.data.model.LoginResponse
 import com.easyreader.elinkclient.data.model.ServerCacheStats
 import com.easyreader.elinkclient.data.model.ServerFontItem
 import com.easyreader.elinkclient.data.model.SyncProgressItem
@@ -95,6 +97,20 @@ class ReaderRepository(
 
     fun cancelNetworkRequests() {
         httpClient.dispatcher.cancelAll()
+    }
+
+    suspend fun login(password: String, deviceName: String = ""): LoginResponse = withContext(Dispatchers.IO) {
+        val payload = LoginRequest(password = password, deviceName = deviceName)
+        api.login(payload)
+    }
+
+    suspend fun verifyToken(token: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val response = api.verifyToken(token)
+            response.valid
+        } catch (e: Exception) {
+            false
+        }
     }
 
     suspend fun searchBooks(keyword: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
