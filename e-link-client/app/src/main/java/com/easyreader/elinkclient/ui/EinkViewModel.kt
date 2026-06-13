@@ -243,8 +243,14 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(
                         authToken = token,
-                        authMessage = "登录成功，${response.expiresInDays} 天内无需重新输入",
+                        authMessage = "登录成功，正在同步...",
                     )
+                }
+                if (networkGate.canUseNetwork()) {
+                    scheduleWifiFullSync("登录成功")
+                }
+                _state.update {
+                    it.copy(authMessage = "登录成功，${response.expiresInDays} 天内无需重新输入")
                 }
             } catch (e: Exception) {
                 _state.update {
