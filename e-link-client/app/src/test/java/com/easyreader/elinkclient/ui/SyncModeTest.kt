@@ -21,8 +21,8 @@ class SyncModeTest {
     }
 
     @Test
-    fun fromStorageReturnsManualProgressOnly() {
-        assertEquals(SyncMode.MANUAL_PROGRESS_ONLY, SyncMode.fromStorage("manual_only"))
+    fun fromStorageReturnsAutoOnWifiForLegacyManualOnly() {
+        assertEquals(SyncMode.AUTO_ON_WIFI, SyncMode.fromStorage("manual_only"))
     }
 
     @Test

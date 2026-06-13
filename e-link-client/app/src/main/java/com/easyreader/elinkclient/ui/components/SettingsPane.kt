@@ -26,11 +26,8 @@ import com.easyreader.elinkclient.ui.EinkUiState
 fun SettingsPane(
     state: EinkUiState,
     onApplyConfig: (String, String) -> Unit,
-    onCycleSyncMode: () -> Unit,
-    onManualSyncProgress: () -> Unit,
     onResolveSyncConflictUseRemote: () -> Unit,
     onForceSyncConflictLocal: () -> Unit,
-    onRefreshOfflineDiagnostics: () -> Unit,
     onPullRemoteProgress: () -> Unit,
     onPullServerBookshelf: () -> Unit,
     onCycleRefreshMode: () -> Unit,
@@ -375,58 +372,6 @@ fun SettingsPane(
 
         item {
             EinkCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "离线诊断",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        OutlinedButton(
-                            onClick = onRefreshOfflineDiagnostics,
-                            enabled = state.isNetworkAvailable,
-                            modifier = Modifier.height(50.dp),
-                        ) {
-                            Text("刷新")
-                        }
-                    }
-
-                    if (state.offlineCatalog.isEmpty()) {
-                        Text(
-                            text = "暂无服务器离线目录诊断数据，需要时手动刷新。",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    } else {
-                        Text(
-                            text = "服务器离线目录 ${state.offlineCatalog.size} 项",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        state.offlineCatalog.take(5).forEach { item ->
-                            Text(
-                                text = "${item.name} · ${item.cachedChapters}/${item.totalChapters}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        if (state.offlineCatalog.size > 5) {
-                            Text(
-                                text = "其余 ${state.offlineCatalog.size - 5} 项已省略",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            EinkCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -438,14 +383,10 @@ fun SettingsPane(
                     style = MaterialTheme.typography.titleSmall,
                 )
 
-                OutlinedButton(
-                    onClick = onCycleSyncMode,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp),
-                ) {
-                    Text("进度策略: ${state.syncMode.label}（点击切换）")
-                }
+                Text(
+                    text = "进度策略: ${state.syncMode.label}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Text(
                     text = "网络状态: ${state.networkMode.label}",
                     style = MaterialTheme.typography.bodySmall,
@@ -508,15 +449,6 @@ fun SettingsPane(
                     }
                 }
 
-                EinkButton(
-                    onClick = onManualSyncProgress,
-                    enabled = state.isNetworkAvailable,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp),
-                ) {
-                    Text("手动同步当前阅读进度")
-                }
                 OutlinedButton(
                     onClick = onPullRemoteProgress,
                     enabled = state.isNetworkAvailable,

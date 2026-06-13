@@ -192,7 +192,6 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
                 isNetworkAvailable = networkAvailable,
                 networkMode = networkModeFor(networkAvailable),
                 offlineTasks = emptyList(),
-                offlineCatalog = emptyList(),
                 activeOfflineTask = null,
                 offlineTaskStatusMessage = "",
                 lastSyncMessage = "配置已保存",
@@ -360,20 +359,6 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 // ignore
             }
-        }
-    }
-
-    fun cycleSyncMode() {
-        val next = when (_state.value.syncMode) {
-            SyncMode.MANUAL_PROGRESS_ONLY -> SyncMode.AUTO_ON_WIFI
-            SyncMode.AUTO_ON_WIFI -> SyncMode.MANUAL_PROGRESS_ONLY
-        }
-        prefs.edit().putString(AppConfig.KEY_SYNC_POLICY, next.storageValue).apply()
-        _state.update {
-            it.copy(
-                syncMode = next,
-                lastSyncMessage = "进度同步策略：${next.label}",
-            )
         }
     }
 
@@ -641,52 +626,6 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
             },
             onErrorPrefix = "删除本地字体失败",
             showLoading = false,
-        )
-    }
-
-    fun refreshOfflineCatalog(showLoading: Boolean = true) {
-        val snapshot = _state.value
-        if (snapshot.userId.isBlank() || snapshot.deviceId.isBlank()) {
-            return
-        }
-        runRequest(
-            block = {
-                val tasks = repository.getOfflineTasks(snapshot.userId, snapshot.deviceId)
-                val catalog = repository.getOfflineCatalog(snapshot.userId, snapshot.deviceId)
-                tasks to catalog
-            },
-            onSuccess = { (tasks, catalog) ->
-                _state.update { state ->
-                    val currentTaskId = state.activeOfflineTask?.taskId
-                    val matchedTask = currentTaskId?.let { taskId ->
-                        tasks.firstOrNull { task -> task.taskId == taskId }
-                    }
-                    val refreshedTask = matchedTask?.let { task ->
-                        ActiveOfflineTaskState(
-                            taskId = task.taskId,
-                            bookName = task.bookName,
-                            status = task.status,
-                            progress = task.progress,
-                            cachedChapters = task.cachedChapters,
-                            totalChapters = task.totalChapters,
-                            errorMessage = task.errorMessage,
-                        )
-                    }
-                    state.copy(
-                        isLoading = if (showLoading) false else state.isLoading,
-                        errorMessage = null,
-                        offlineTasks = tasks,
-                        offlineCatalog = catalog,
-                        activeOfflineTask = refreshedTask ?: state.activeOfflineTask,
-                        offlineTaskStatusMessage = refreshedTask?.let { task ->
-                            buildOfflineTaskStatusMessage(task.bookName, task.status, task.progress, task.cachedChapters, task.totalChapters)
-                        } ?: state.offlineTaskStatusMessage,
-                        lastSyncMessage = "服务器离线诊断已刷新：目录 ${catalog.size} 项",
-                    )
-                }
-            },
-            onErrorPrefix = "刷新服务器离线诊断失败",
-            showLoading = showLoading,
         )
     }
 
@@ -1133,9 +1072,6 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun syncCurrentProgress(force: Boolean = false) {
         val snapshot = _state.value
-        if (!force && snapshot.syncMode == SyncMode.MANUAL_PROGRESS_ONLY) {
-            return
-        }
         val payload = buildProgressPayload(snapshot) ?: return
         if (!refreshNetworkAvailability()) {
             enqueuePendingProgress(payload, if (force) "WiFi 未连接，进度已加入待补传" else "离线状态，进度已暂存")
@@ -1212,14 +1148,6 @@ class EinkViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pullServerBookshelfNow() {
         refreshServerBooks(showLoading = true)
-    }
-
-    fun manualSyncProgressNow() {
-        if (_state.value.activeBookKey.isNullOrBlank()) {
-            _state.update { it.copy(errorMessage = "当前没有可同步的阅读会话") }
-            return
-        }
-        syncCurrentProgress(force = true)
     }
 
     fun syncOnAppForeground() {

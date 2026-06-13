@@ -325,11 +325,8 @@ fun MainScreen(viewModel: EinkViewModel) {
                         SettingsPane(
                             state = state,
                             onApplyConfig = viewModel::updateServerConfig,
-                            onCycleSyncMode = viewModel::cycleSyncMode,
-                            onManualSyncProgress = viewModel::manualSyncProgressNow,
                             onResolveSyncConflictUseRemote = viewModel::resolveSyncConflictUseRemote,
                             onForceSyncConflictLocal = viewModel::forceSyncConflictLocal,
-                            onRefreshOfflineDiagnostics = viewModel::refreshOfflineCatalog,
                             onPullRemoteProgress = viewModel::pullRemoteProgress,
                             onPullServerBookshelf = viewModel::pullServerBookshelfNow,
                             onCycleRefreshMode = viewModel::cycleRefreshMode,

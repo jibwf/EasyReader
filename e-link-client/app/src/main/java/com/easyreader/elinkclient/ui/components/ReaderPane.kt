@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -32,10 +33,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -46,9 +47,6 @@ import com.easyreader.elinkclient.ui.EinkUiState
 import com.easyreader.elinkclient.ui.ReaderHardwareAction
 import com.easyreader.elinkclient.ui.ReaderFontStyle
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -149,13 +147,8 @@ fun ReaderPane(
         }
     }
     val readerTextColor = MaterialTheme.colorScheme.onBackground.toArgb()
-    val clockFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA) }
-    val currentDateTimeLabel = remember { clockFormatter.format(Date()) }
-    val chapterTitleLabel = if (state.activeChapterTitle.isBlank()) {
-        chapterIndicator
-    } else {
-        "$chapterIndicator · ${state.activeChapterTitle}"
-    }
+    val topBarHeight = 40.dp
+    val bottomBarHeight = 50.dp
 
     fun calculateReadingPosition(scrollView: ScrollView, textView: TextView): Double {
         val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
@@ -271,6 +264,8 @@ fun ReaderPane(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(topBarHeight)
+                    .background(Color.White)
                     .padding(horizontal = 2.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -282,11 +277,15 @@ fun ReaderPane(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = currentDateTimeLabel,
+                    text = chapterIndicator,
                     style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
+
+            HorizontalDivider()
 
             Box(
                 modifier = Modifier
@@ -333,64 +332,69 @@ fun ReaderPane(
                         }
                     }
                 } else {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { context ->
-                            ScrollView(context).apply {
-                                readerScrollView = this
-                                isFillViewport = true
-                                overScrollMode = ScrollView.OVER_SCROLL_NEVER
-                                setBackgroundColor(AndroidColor.WHITE)
-                                addView(
-                                    TextView(context).apply {
-                                        includeFontPadding = false
-                                        setPadding(0, 4, 0, 16)
-                                        setTextColor(readerTextColor)
-                                        setBackgroundColor(AndroidColor.WHITE)
-                                    },
-                                    ViewGroup.LayoutParams(
-                                        ViewGroup.LayoutParams.MATCH_PARENT,
-                                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                                    ),
-                                )
-                            }
-                        },
-                        update = { scrollView ->
-                            readerScrollView = scrollView
-                            val textView = scrollView.getChildAt(0) as TextView
-                            scrollView.setBackgroundColor(AndroidColor.WHITE)
-                            scrollView.setOnScrollChangeListener { view, _, _, _, _ ->
-                                if (state.chapterType == "novel" && state.activeChapterCached) {
-                                    val scrollingView = view as? ScrollView ?: return@setOnScrollChangeListener
-                                    val contentView = scrollingView.getChildAt(0) as? TextView ?: return@setOnScrollChangeListener
-                                    latestPositionCallback(calculateReadingPosition(scrollingView, contentView))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clipToBounds()
+                            .background(Color.White),
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { context ->
+                                ScrollView(context).apply {
+                                    readerScrollView = this
+                                    isFillViewport = true
+                                    overScrollMode = ScrollView.OVER_SCROLL_NEVER
+                                    setBackgroundColor(AndroidColor.WHITE)
+                                    addView(
+                                        TextView(context).apply {
+                                            includeFontPadding = false
+                                            setPadding(0, 12, 0, 24)
+                                            setTextColor(readerTextColor)
+                                            setBackgroundColor(AndroidColor.WHITE)
+                                        },
+                                        ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                                        ),
+                                    )
                                 }
-                            }
-                            textView.text = state.chapterText
-                            textView.setBackgroundColor(AndroidColor.WHITE)
-                            textView.setTextColor(readerTextColor)
-                            textView.textSize = state.readerFontSizeSp.toFloat()
-                            textView.setLineSpacing(0f, state.readerLineSpacing)
-                            textView.typeface = customTypeface ?: when (state.readerFontStyle) {
-                                ReaderFontStyle.SANS -> Typeface.SANS_SERIF
-                                ReaderFontStyle.SERIF -> Typeface.SERIF
-                            }
-                            val previousChapterKey = scrollView.tag as? String
-                            if (previousChapterKey != chapterRestoreKey) {
-                                scrollView.tag = chapterRestoreKey
-                                scrollView.post {
-                                    val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
-                                    val contentHeight = textView.height.coerceAtLeast(0)
-                                    val maxScroll = (contentHeight - viewportHeight).coerceAtLeast(0)
-                                    val targetScroll = (maxScroll * state.activeChapterPosition).roundToInt().coerceIn(0, maxScroll)
-                                    scrollView.scrollTo(0, targetScroll)
-                                    latestPositionCallback(calculateReadingPosition(scrollView, textView))
+                            },
+                            update = { scrollView ->
+                                readerScrollView = scrollView
+                                val textView = scrollView.getChildAt(0) as TextView
+                                scrollView.setBackgroundColor(AndroidColor.WHITE)
+                                scrollView.setOnScrollChangeListener { view, _, _, _, _ ->
+                                    if (state.chapterType == "novel" && state.activeChapterCached) {
+                                        val scrollingView = view as? ScrollView ?: return@setOnScrollChangeListener
+                                        val contentView = scrollingView.getChildAt(0) as? TextView ?: return@setOnScrollChangeListener
+                                        latestPositionCallback(calculateReadingPosition(scrollingView, contentView))
+                                    }
                                 }
-                            }
-                        },
-                    )
+                                textView.text = state.chapterText
+                                textView.setBackgroundColor(AndroidColor.WHITE)
+                                textView.setTextColor(readerTextColor)
+                                textView.textSize = state.readerFontSizeSp.toFloat()
+                                textView.setLineSpacing(0f, state.readerLineSpacing)
+                                textView.typeface = customTypeface ?: when (state.readerFontStyle) {
+                                    ReaderFontStyle.SANS -> Typeface.SANS_SERIF
+                                    ReaderFontStyle.SERIF -> Typeface.SERIF
+                                }
+                                val previousChapterKey = scrollView.tag as? String
+                                if (previousChapterKey != chapterRestoreKey) {
+                                    scrollView.tag = chapterRestoreKey
+                                    scrollView.post {
+                                        val viewportHeight = (scrollView.height - scrollView.paddingTop - scrollView.paddingBottom).coerceAtLeast(0)
+                                        val contentHeight = textView.height.coerceAtLeast(0)
+                                        val maxScroll = (contentHeight - viewportHeight).coerceAtLeast(0)
+                                        val targetScroll = (maxScroll * state.activeChapterPosition).roundToInt().coerceIn(0, maxScroll)
+                                        scrollView.scrollTo(0, targetScroll)
+                                        latestPositionCallback(calculateReadingPosition(scrollView, textView))
+                                    }
+                                }
+                            },
+                        )
 
-                    Row(modifier = Modifier.fillMaxSize()) {
                         Column(modifier = Modifier.fillMaxSize()) {
                             Box(
                                 modifier = Modifier
@@ -434,14 +438,22 @@ fun ReaderPane(
                 }
             }
 
+            HorizontalDivider()
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(bottomBarHeight)
+                    .background(Color.White)
+                    .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedButton(
                     onClick = onToggleAutoTurn,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
                 ) {
                     Text(
                         if (state.autoPageTurnEnabled) {
@@ -451,17 +463,11 @@ fun ReaderPane(
                         }
                     )
                 }
-                Text(
-                    text = chapterTitleLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(2f),
-                )
                 OutlinedButton(
                     onClick = onExitReader,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
                 ) {
                     Text("退出阅读")
                 }

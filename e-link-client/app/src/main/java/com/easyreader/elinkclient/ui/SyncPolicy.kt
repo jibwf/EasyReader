@@ -6,7 +6,6 @@ enum class NetworkMode(val label: String) {
 }
 
 enum class SyncMode(val storageValue: String, val label: String) {
-    MANUAL_PROGRESS_ONLY("manual_only", "仅手动推送进度"),
     AUTO_ON_WIFI("auto_when_online", "WiFi 下自动推送进度");
 
     companion object {

@@ -8,7 +8,6 @@ import com.easyreader.elinkclient.data.model.BookItem
 import com.easyreader.elinkclient.data.model.ChapterItem
 import com.easyreader.elinkclient.data.model.ClientCacheStats
 import com.easyreader.elinkclient.data.model.LocalShelfBook
-import com.easyreader.elinkclient.data.model.OfflineCatalogItem
 import com.easyreader.elinkclient.data.model.OfflineTaskItem
 import com.easyreader.elinkclient.data.model.SearchResultItem
 import com.easyreader.elinkclient.data.model.ServerCacheStats
@@ -108,7 +107,6 @@ data class EinkUiState(
     val serverBooks: List<BookItem> = emptyList(),
     val localBookshelf: List<LocalShelfBook> = emptyList(),
     val offlineTasks: List<OfflineTaskItem> = emptyList(),
-    val offlineCatalog: List<OfflineCatalogItem> = emptyList(),
     val searchKeyword: String = "",
     val searchResults: List<SearchResultItem> = emptyList(),
     val bookCategories: List<BookCategoryItem> = emptyList(),
