@@ -49,16 +49,19 @@ fun BookshelfPane(
     val categoryItems = remember(state.bookCategories) {
         listOf("all") + state.bookCategories.filter { !it.hidden }.map { it.name }
     }
+    val hiddenCategoryNames = remember(state.bookCategories) {
+        state.bookCategories.filter { it.hidden }.map { it.name }.toSet()
+    }
     val visibleServerBooks = remember(state.serverBooks, state.selectedCategory) {
         if (state.selectedCategory == "all") {
-            state.serverBooks
+            state.serverBooks.filter { it.categoryName !in hiddenCategoryNames }
         } else {
             state.serverBooks.filter { it.categoryName == state.selectedCategory }
         }
     }
     val visibleLocalBooks = remember(state.localBookshelf, state.selectedCategory) {
         if (state.selectedCategory == "all") {
-            state.localBookshelf
+            state.localBookshelf.filter { it.categoryName !in hiddenCategoryNames }
         } else {
             state.localBookshelf.filter { it.categoryName == state.selectedCategory }
         }
@@ -86,11 +89,6 @@ fun BookshelfPane(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = "同步入口",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth(),
