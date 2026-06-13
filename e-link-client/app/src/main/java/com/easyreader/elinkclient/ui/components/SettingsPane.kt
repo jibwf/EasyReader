@@ -247,7 +247,7 @@ fun SettingsPane(
                                         onClick = { onToggleCategoryHidden(category.name, !category.hidden) },
                                         enabled = state.isNetworkAvailable,
                                     ) {
-                                        Text(if (category.hidden) "显示" else "隐藏")
+                                        Text(if (category.hidden) "取消隐藏" else "隐藏")
                                     }
                                     if (!category.preset) {
                                         OutlinedButton(
