@@ -123,73 +123,53 @@ fun SettingsPane(
                         Text("刷新缓存统计")
                     }
                 }
-            }
-        }
-        }
 
-        item {
-            EinkCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                if (state.authToken.isNotBlank()) {
                     Text(
-                        text = "认证管理",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        text = "设置密码保护系统访问。登录后 Token 保存在本地，90 天内无需重新输入。",
+                        text = "已登录",
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
                     )
-
-                    if (state.authToken.isNotBlank()) {
-                        Text(
-                            text = "已登录",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        OutlinedButton(
-                            onClick = onLogout,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(40.dp),
-                        ) {
-                            Text("退出登录")
-                        }
-                    } else {
-                        OutlinedTextField(
-                            value = editablePassword,
-                            onValueChange = { editablePassword = it },
-                            label = { Text("输入密码") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        EinkButton(
-                            onClick = {
-                                if (editablePassword.isNotBlank()) {
-                                    onLogin(editablePassword)
-                                    editablePassword = ""
-                                }
-                            },
-                            enabled = editablePassword.isNotBlank() && state.isNetworkAvailable,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp),
-                        ) {
-                            Text("登录")
-                        }
+                    OutlinedButton(
+                        onClick = onLogout,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp),
+                    ) {
+                        Text("退出登录")
                     }
-
-                    if (state.authMessage.isNotBlank()) {
-                        Text(
-                            text = state.authMessage,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                } else {
+                    OutlinedTextField(
+                        value = editablePassword,
+                        onValueChange = { editablePassword = it },
+                        label = { Text("输入密码登录") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    EinkButton(
+                        onClick = {
+                            if (editablePassword.isNotBlank()) {
+                                onLogin(editablePassword)
+                                editablePassword = ""
+                            }
+                        },
+                        enabled = editablePassword.isNotBlank() && state.isNetworkAvailable,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp),
+                    ) {
+                        Text("登录")
                     }
                 }
+
+                if (state.authMessage.isNotBlank()) {
+                    Text(
+                        text = state.authMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
+        }
         }
 
         item {

@@ -57,6 +57,12 @@ fun MainScreen(viewModel: EinkViewModel) {
     var currentTabName by rememberSaveable { mutableStateOf(ScreenTab.Home.name) }
     var showReader by rememberSaveable { mutableStateOf(false) }
 
+    LaunchedEffect(state.authToken) {
+        if (state.authToken.isBlank() && currentTabName != ScreenTab.Settings.name) {
+            currentTabName = ScreenTab.Settings.name
+        }
+    }
+
     LaunchedEffect(state.activeBookKey) {
         if (state.activeBookKey.isNullOrBlank()) {
             showReader = false
