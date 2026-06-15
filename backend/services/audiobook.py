@@ -29,6 +29,39 @@ def _media_type_from_ext(ext: str) -> str:
     return "video" if ext.lower() in VIDEO_EXTENSIONS else "audio"
 
 
+def _detect_media_type(file_path: Path) -> str:
+    """Detect actual media type by reading file header bytes."""
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(12)
+        if len(header) < 4:
+            return "audio"
+        # MP4/MOV container: starts with box size + 'ftyp'
+        if header[4:8] == b"ftyp":
+            return "video"
+        # AAC ADTS frame: starts with 0xFF 0xF1 or 0xFF 0xF9 or 0xFF 0xF3
+        if header[0] == 0xFF and (header[1] & 0xF0) in (0xF0, 0xE0):
+            return "audio"
+        # MP3: starts with ID3 tag or sync word
+        if header[:3] == b"ID3" or (header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+            return "audio"
+        # OGG: starts with 'OggS'
+        if header[:4] == b"OggS":
+            return "audio"
+        # FLAC: starts with 'fLaC'
+        if header[:4] == b"fLaC":
+            return "audio"
+        # WAV: starts with 'RIFF'
+        if header[:4] == b"RIFF":
+            return "audio"
+        # WebM/Matroska: starts with 0x1A 0x45 0xDF 0xA3
+        if header[:4] == b"\x1a\x45\xdf\xa3":
+            return "video"
+    except Exception:
+        pass
+    return _media_type_from_ext(file_path.suffix)
+
+
 def _encode_media_url(dir_name: str, filename: str) -> str:
     """Encode media URL so browsers can fetch it correctly."""
     encoded_dir = quote(dir_name, safe="")
@@ -133,7 +166,7 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
     for idx, media_file in enumerate(media_files):
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
-        media_type = _media_type_from_ext(media_file.suffix)
+        media_type = _detect_media_type(media_file)
 
         await db.execute(
             "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
@@ -211,7 +244,7 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
         rel_path = media_file.relative_to(audiobook_dir)
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
-        media_type = _media_type_from_ext(media_file.suffix)
+        media_type = _detect_media_type(media_file)
 
         await db.execute(
             "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
