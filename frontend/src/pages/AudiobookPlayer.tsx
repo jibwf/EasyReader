@@ -99,8 +99,12 @@ export default function AudiobookPlayer() {
     return <div className="pt-12 text-center text-[13px] text-[#c7c7cc]">缺少 book_key</div>;
   }
 
+  const gradientStyle = {
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+  };
+
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen" style={gradientStyle}>
       <div className="fixed top-0 inset-x-0 z-50 flex items-center px-4 py-3 bg-white/90 backdrop-blur-xl border-b border-black/[0.06]">
         <button onClick={() => navigate(-1)} className="text-[13px] text-[#86868b] mr-4">
           ← 返回
@@ -129,12 +133,20 @@ export default function AudiobookPlayer() {
         )}
 
         {!showVideo && (
-          <div className="mx-auto aspect-square max-w-[300px] bg-black/5 flex items-center justify-center">
-            {loading ? (
-              <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
-            ) : (
-              <span className={`text-[80px] ${currentMedia ? "" : "opacity-20"}`}>🎧</span>
-            )}
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="w-48 h-48 bg-white/20 rounded-2xl backdrop-blur-sm border border-white/30 flex items-center justify-center mb-6">
+              {loading ? (
+                <p className="text-[13px] text-white/80">加载中...</p>
+              ) : (
+                <span className={`text-6xl ${currentMedia ? "" : "opacity-20"}`}>🎧</span>
+              )}
+            </div>
+            <h2 className="text-xl font-semibold text-white mb-2">
+              {chapter?.title || "加载中..."}
+            </h2>
+            <p className="text-sm text-white/80">
+              {chapters.length > 0 ? `第 ${currentIdx + 1} / ${chapters.length} 章` : ""}
+            </p>
           </div>
         )}
         {showVideo && !currentMedia && (
@@ -142,15 +154,6 @@ export default function AudiobookPlayer() {
             <span className="text-[80px] opacity-20">🎧</span>
           </div>
         )}
-
-        <div className="px-4 mt-4 text-center">
-          <h2 className="text-[16px] font-medium text-[#1d1d1f]">
-            {chapter?.title || "加载中..."}
-          </h2>
-          <p className="text-[12px] text-[#86868b] mt-1">
-            {chapters.length > 0 ? `第 ${currentIdx + 1} / ${chapters.length} 章` : ""}
-          </p>
-        </div>
 
         {error && (
           <div className="mx-4 mt-4 p-3 rounded-lg bg-red-50 border border-red-200">

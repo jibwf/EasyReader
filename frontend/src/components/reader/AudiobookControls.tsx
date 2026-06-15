@@ -221,71 +221,74 @@ export default function AudiobookControls({
   return (
     <div className="w-full">
       {/* Progress bar */}
-      <div className="px-4 mb-2">
+      <div className="px-4 mb-4">
         <div
           ref={progressRef}
-          className="relative h-1.5 bg-black/10 rounded-full cursor-pointer group"
+          className="relative h-1 bg-white/30 rounded-full cursor-pointer group"
           onMouseDown={handleProgressMouseDown}
         >
           <div
-            className="absolute inset-y-0 left-0 bg-[#c45d35] rounded-full"
+            className="absolute inset-y-0 left-0 bg-white rounded-full"
             style={{ width: `${progress}%` }}
           />
           <div
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-[#c45d35] rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
             style={{ left: `calc(${progress}% - 6px)` }}
           />
         </div>
-        <div className="flex justify-between text-[11px] text-[#86868b] mt-1 tabular-nums">
+        <div className="flex justify-between text-xs text-white/70 mt-1 tabular-nums">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
         </div>
       </div>
 
       {/* Main controls */}
-      <div className="flex items-center justify-center gap-3 px-4 py-2">
+      <div className="flex items-center justify-center gap-6 px-4 py-4">
         <button
           onClick={() => { const prev = chapters.find((ch) => ch.idx === currentIdx - 1); if (prev) onChapterChange(prev); }}
           disabled={!hasPrev}
-          className="w-10 h-10 flex items-center justify-center rounded-full text-[18px] disabled:opacity-20 active:bg-black/5"
+          className="text-white/80 text-2xl disabled:opacity-30"
         >
           ⏮
         </button>
         <button
           onClick={() => seekBy(-15)}
-          className="w-10 h-10 flex items-center justify-center rounded-full text-[13px] text-[#86868b] active:bg-black/5"
+          className="text-white/80 text-lg"
         >
           ⏪15
         </button>
         <button
           onClick={togglePlay}
-          className="w-14 h-14 flex items-center justify-center rounded-full bg-[#c45d35] text-white text-[22px] active:bg-[#b05230]"
+          className="bg-white text-[#667eea] w-16 h-16 rounded-full flex items-center justify-center text-2xl shadow-lg active:bg-white/90"
         >
           {isPlaying ? "⏸" : "▶"}
         </button>
         <button
           onClick={() => seekBy(15)}
-          className="w-10 h-10 flex items-center justify-center rounded-full text-[13px] text-[#86868b] active:bg-black/5"
+          className="text-white/80 text-lg"
         >
           15⏩
         </button>
         <button
           onClick={() => { const next = chapters.find((ch) => ch.idx === currentIdx + 1); if (next) onChapterChange(next); }}
           disabled={!hasNext}
-          className="w-10 h-10 flex items-center justify-center rounded-full text-[18px] disabled:opacity-20 active:bg-black/5"
+          className="text-white/80 text-2xl disabled:opacity-30"
         >
           ⏭
         </button>
       </div>
 
       {/* Bottom bar */}
-      <div className="flex items-center justify-end px-4 py-2 text-[12px] text-[#86868b] gap-2">
+      <div className="flex items-center justify-around px-4 py-4 border-t border-white/20">
         <div className="relative">
           <button
             onClick={() => { setShowSleepMenu(!showSleepMenu); setShowRateMenu(false); }}
-            className="px-3 py-1.5 rounded-lg active:bg-black/5"
+            className="flex flex-col items-center"
           >
-            ⏰ {sleepTimerRemaining !== null ? formatRemaining(sleepTimerRemaining) : "定时"}
+            <span className="text-xl mb-1">⏰</span>
+            <span className="text-xs text-white/70">
+              {sleepTimerRemaining !== null ? formatRemaining(sleepTimerRemaining) : "定时"}
+            </span>
           </button>
           {showSleepMenu && (
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white rounded-xl shadow-xl border border-black/[0.06] py-1 z-50 min-w-[120px]">
@@ -294,7 +297,7 @@ export default function AudiobookControls({
                   key={String(opt.value)}
                   onClick={() => startSleepTimer(opt.value)}
                   className={`block w-full text-left px-4 py-2 text-[13px] hover:bg-black/[0.03] ${
-                    sleepTimerMinutes === opt.value ? "text-[#c45d35] font-medium" : "text-[#1d1d1f]"
+                    sleepTimerMinutes === opt.value ? "text-[#667eea] font-medium" : "text-[#1d1d1f]"
                   }`}
                 >
                   {opt.label}
@@ -303,22 +306,14 @@ export default function AudiobookControls({
             </div>
           )}
         </div>
-
-        {hasVideo && (
-          <button
-            onClick={onToggleVideo}
-            className="px-3 py-1.5 rounded-lg active:bg-black/5"
-          >
-            {showVideo ? "🔊 纯音频" : "🎬 显示画面"}
-          </button>
-        )}
-
+        
         <div className="relative">
           <button
             onClick={() => { setShowRateMenu(!showRateMenu); setShowSleepMenu(false); }}
-            className="px-3 py-1.5 rounded-lg active:bg-black/5 tabular-nums"
+            className="flex flex-col items-center"
           >
-            {playbackRate}x
+            <span className="text-xl mb-1">🔊</span>
+            <span className="text-xs text-white/70 tabular-nums">{playbackRate}x</span>
           </button>
           {showRateMenu && (
             <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-xl border border-black/[0.06] py-1 z-50 min-w-[80px]">
@@ -327,7 +322,7 @@ export default function AudiobookControls({
                   key={rate}
                   onClick={() => { setPlaybackRate(rate); setShowRateMenu(false); }}
                   className={`block w-full text-left px-4 py-2 text-[13px] hover:bg-black/[0.03] ${
-                    playbackRate === rate ? "text-[#c45d35] font-medium" : "text-[#1d1d1f]"
+                    playbackRate === rate ? "text-[#667eea] font-medium" : "text-[#1d1d1f]"
                   }`}
                 >
                   {rate}x
@@ -336,12 +331,32 @@ export default function AudiobookControls({
             </div>
           )}
         </div>
+        
+        {hasVideo && (
+          <button
+            onClick={onToggleVideo}
+            className="flex flex-col items-center"
+          >
+            <span className="text-xl mb-1">🎬</span>
+            <span className="text-xs text-white/70">{showVideo ? "纯音频" : "显示画面"}</span>
+          </button>
+        )}
+        
+        <button className="flex flex-col items-center">
+          <span className="text-xl mb-1">📋</span>
+          <span className="text-xs text-white/70">目录</span>
+        </button>
+        
+        <button className="flex flex-col items-center">
+          <span className="text-xl mb-1">❤️</span>
+          <span className="text-xs text-white/70">收藏</span>
+        </button>
       </div>
 
       {/* Inline chapter list */}
       {chapters.length > 0 && (
-        <div className="mt-4 border-t border-black/[0.06] pt-3">
-          <h4 className="text-[12px] font-semibold uppercase tracking-wider text-[#86868b] mb-2 px-1">
+        <div className="mt-4 border-t border-white/20 pt-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-white/70 mb-2 px-1">
             目录 · {chapters.length} 章
           </h4>
           <div className="max-h-[300px] overflow-y-auto">
@@ -349,10 +364,10 @@ export default function AudiobookControls({
               <button
                 key={ch.idx}
                 onClick={() => onChapterChange(ch)}
-                className={`block w-full text-left px-3 py-2 text-[13px] truncate rounded transition-colors ${
+                className={`block w-full text-left px-3 py-2 text-sm truncate rounded transition-colors ${
                   ch.idx === currentIdx
-                    ? "text-[#c45d35] font-medium bg-[#c45d35]/[0.04]"
-                    : "text-[#1d1d1f] hover:bg-black/[0.03]"
+                    ? "text-white font-medium bg-white/20"
+                    : "text-white/80 hover:bg-white/10"
                 }`}
               >
                 {ch.title}
