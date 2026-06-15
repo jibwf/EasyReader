@@ -59,11 +59,13 @@ export default function AudiobookControls({
   const sleepTimerRef = useRef<ReturnType<typeof setInterval>>();
   const progressRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const media = mediaRef.current;
     if (!media) return;
 
+    setReady(false);
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     const onTimeUpdate = () => { if (!dragging) setCurrentTime(media.currentTime); };
@@ -72,12 +74,14 @@ export default function AudiobookControls({
       const next = chapters.find((ch) => ch.idx === currentIdx + 1);
       if (next) onChapterChange(next);
     };
+    const onCanPlay = () => setReady(true);
 
     media.addEventListener("play", onPlay);
     media.addEventListener("pause", onPause);
     media.addEventListener("timeupdate", onTimeUpdate);
     media.addEventListener("durationchange", onDurationChange);
     media.addEventListener("ended", onEnded);
+    media.addEventListener("canplay", onCanPlay);
 
     return () => {
       media.removeEventListener("play", onPlay);
@@ -85,6 +89,7 @@ export default function AudiobookControls({
       media.removeEventListener("timeupdate", onTimeUpdate);
       media.removeEventListener("durationchange", onDurationChange);
       media.removeEventListener("ended", onEnded);
+      media.removeEventListener("canplay", onCanPlay);
     };
   }, [mediaRef, chapters, currentIdx, onChapterChange, dragging]);
 
@@ -161,8 +166,8 @@ export default function AudiobookControls({
 
   const togglePlay = () => {
     const media = mediaRef.current;
-    if (!media) return;
-    if (media.paused) media.play();
+    if (!media || !ready) return;
+    if (media.paused) media.play().catch(() => {});
     else media.pause();
   };
 
