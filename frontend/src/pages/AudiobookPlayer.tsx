@@ -40,7 +40,7 @@ export default function AudiobookPlayer() {
   const loadChapter = useCallback(async (chapter: Chapter) => {
     setLoading(true);
     try {
-      const res = await api.getChapterContent(chapter.url, chapter.book_key);
+      const res = await api.getChapterContent(chapter.url, "local://audiobook");
       if (res.type === "audiobook") {
         setManifest(res.manifest);
         setCurrentIdx(chapter.idx);

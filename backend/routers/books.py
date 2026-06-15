@@ -198,6 +198,9 @@ async def list_books(
     conditions = []
     params: list[str] = []
 
+    # Exclude audiobooks from bookshelf
+    conditions.append("b.source_url != 'local://audiobook'")
+
     if not include_hidden:
         conditions.append("COALESCE(c.hidden, 0) = 0")
 
