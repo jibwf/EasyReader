@@ -30,36 +30,25 @@ def _media_type_from_ext(ext: str) -> str:
 
 
 def _detect_media_type(file_path: Path) -> str:
-    """Detect actual media type by reading file header bytes."""
+    """Detect actual media type by reading file header bytes.
+    
+    Returns 'video' only for MP4 containers that browsers can play.
+    Returns 'audio' for MPEG-TS and other formats that browsers handle as audio.
+    """
     try:
         with open(file_path, "rb") as f:
             header = f.read(12)
         if len(header) < 4:
             return "audio"
-        # MP4/MOV container: starts with box size + 'ftyp'
+        # MP4/MOV container: starts with box size + 'ftyp' — browsers can play this as video
         if header[4:8] == b"ftyp":
             return "video"
-        # AAC ADTS frame: starts with 0xFF 0xF1 or 0xFF 0xF9 or 0xFF 0xF3
-        if header[0] == 0xFF and (header[1] & 0xF0) in (0xF0, 0xE0):
-            return "audio"
-        # MP3: starts with ID3 tag or sync word
-        if header[:3] == b"ID3" or (header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
-            return "audio"
-        # OGG: starts with 'OggS'
-        if header[:4] == b"OggS":
-            return "audio"
-        # FLAC: starts with 'fLaC'
-        if header[:4] == b"fLaC":
-            return "audio"
-        # WAV: starts with 'RIFF'
-        if header[:4] == b"RIFF":
-            return "audio"
-        # WebM/Matroska: starts with 0x1A 0x45 0xDF 0xA3
-        if header[:4] == b"\x1a\x45\xdf\xa3":
-            return "video"
+        # Everything else (MPEG-TS 0x47, AAC 0xFF, MP3 ID3, OGG, FLAC, WAV, WebM):
+        # Use <audio> element — browsers handle audio playback reliably for these formats
+        return "audio"
     except Exception:
         pass
-    return _media_type_from_ext(file_path.suffix)
+    return "audio"
 
 
 def _encode_media_url(dir_name: str, filename: str) -> str:
