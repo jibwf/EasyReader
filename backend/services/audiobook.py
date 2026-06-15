@@ -33,26 +33,77 @@ def _media_type_from_ext(ext: str) -> str:
     return "video" if ext.lower() in VIDEO_EXTENSIONS else "audio"
 
 
-def _detect_media_type(file_path: Path) -> str:
-    """Detect actual media type by reading file header bytes.
-    
-    Returns 'video' only for MP4 containers that browsers can play.
-    Returns 'audio' for MPEG-TS and other formats that browsers handle as audio.
-    """
+# Browser-compatible audio codecs in MP4 container
+_BROWSER_COMPATIBLE_AUDIO = {"aac", "opus", "mp3"}
+# Browser-compatible video codecs
+_BROWSER_COMPATIBLE_VIDEO = {"h264", "vp8", "vp9", "av1"}
+
+
+def _probe_codecs(file_path: Path) -> tuple[str, str]:
+    """Use ffprobe to detect video and audio codecs. Returns (video_codec, audio_codec)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(file_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            return ("", "")
+        probe = json.loads(result.stdout)
+        video_codec = ""
+        audio_codec = ""
+        for stream in probe.get("streams", []):
+            if stream.get("codec_type") == "video" and not video_codec:
+                video_codec = stream.get("codec_name", "")
+            elif stream.get("codec_type") == "audio" and not audio_codec:
+                audio_codec = stream.get("codec_name", "")
+        return (video_codec, audio_codec)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return ("", "")
+
+
+def _needs_transcode(file_path: Path) -> bool:
+    """Check if a file needs transcoding for browser compatibility."""
+    # Only check MP4 files — other formats are already handled as audio
     try:
         with open(file_path, "rb") as f:
-            header = f.read(12)
-        if len(header) < 4:
-            return "audio"
-        # MP4/MOV container: starts with box size + 'ftyp' — browsers can play this as video
-        if header[4:8] == b"ftyp":
-            return "video"
-        # Everything else (MPEG-TS 0x47, AAC 0xFF, MP3 ID3, OGG, FLAC, WAV, WebM):
-        # Use <audio> element — browsers handle audio playback reliably for these formats
-        return "audio"
+            header = f.read(8)
+        if len(header) < 8 or header[4:8] != b"ftyp":
+            return False  # Not MP4 container, already handled as audio
     except Exception:
-        pass
-    return "audio"
+        return False
+
+    video_codec, audio_codec = _probe_codecs(file_path)
+    if not audio_codec:
+        return False  # Can't determine, skip transcoding
+
+    # If audio codec is not browser-compatible, need transcoding
+    return audio_codec.lower() not in _BROWSER_COMPATIBLE_AUDIO
+
+
+def _transcode_to_compatible(file_path: Path) -> Path | None:
+    """Transcode a file to browser-compatible MP4 (H264+AAC). Returns the new path or None."""
+    output_path = file_path.with_suffix(".compatible.mp4")
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", str(file_path),
+             "-c:v", "copy",  # Keep video as-is (H264 is already compatible)
+             "-c:a", "aac", "-b:a", "128k",  # Re-encode audio to AAC
+             "-y", str(output_path)],
+            capture_output=True, timeout=600,
+        )
+        if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+            file_path.unlink()
+            output_path.rename(file_path)
+            return file_path
+        else:
+            # Clean up failed output
+            if output_path.exists():
+                output_path.unlink()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.warning("ffmpeg transcoding failed for %s: %s", file_path, e)
+        if output_path.exists():
+            output_path.unlink()
+    return None
 
 
 def _encode_media_url(dir_name: str, filename: str) -> str:
@@ -60,26 +111,6 @@ def _encode_media_url(dir_name: str, filename: str) -> str:
     encoded_dir = quote(dir_name, safe="")
     encoded_file = quote(filename, safe="")
     return f"/api/media/{encoded_dir}/{encoded_file}"
-
-
-def _transcode_to_mp4(input_path: Path) -> Path | None:
-    """Transcode a media file to MP4 using ffmpeg. Returns the new path or None on failure."""
-    output_path = input_path.with_suffix(".mp4")
-    if output_path == input_path:
-        output_path = input_path.with_suffix(".transcoded.mp4")
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-i", str(input_path), "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
-             "-y", str(output_path)],
-            capture_output=True, timeout=300,
-        )
-        if result.returncode == 0 and output_path.exists():
-            input_path.unlink()
-            output_path.rename(input_path)
-            return input_path
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        logger.warning("ffmpeg transcoding failed for %s: %s", input_path, e)
-    return None
 
 
 async def scan_audiobooks() -> dict:
@@ -177,15 +208,23 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
-        # Transcode non-MP4-container files to MP4 for browser compatibility
-        if _detect_media_type(media_file) == "audio":
-            transcoded = _transcode_to_mp4(media_file)
+        # Transcode MP4 files with incompatible audio codecs (e.g. H264+MP3)
+        if _needs_transcode(media_file):
+            transcoded = _transcode_to_compatible(media_file)
             if transcoded:
                 media_file = transcoded
 
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
-        media_type = _detect_media_type(media_file)
+        # Determine media type: MP4 container = video, else = audio
+        media_type = "video"
+        try:
+            with open(media_file, "rb") as f:
+                header = f.read(8)
+            if len(header) < 8 or header[4:8] != b"ftyp":
+                media_type = "audio"
+        except Exception:
+            media_type = "audio"
 
         await db.execute(
             "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
@@ -259,19 +298,25 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
-        # Transcode non-MP4-container files to MP4 for browser compatibility
-        # Check actual file header, not just extension
-        if _detect_media_type(media_file) == "audio":
-            transcoded = _transcode_to_mp4(media_file)
+        # Transcode MP4 files with incompatible audio codecs (e.g. H264+MP3)
+        if _needs_transcode(media_file):
+            transcoded = _transcode_to_compatible(media_file)
             if transcoded:
                 media_file = transcoded
-                rel_path = media_file.relative_to(audiobook_dir)
 
         # Compute relative path from audiobook folder for URL
         rel_path = media_file.relative_to(audiobook_dir)
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
-        media_type = _detect_media_type(media_file)
+        # Determine media type: MP4 container = video, else = audio
+        media_type = "video"
+        try:
+            with open(media_file, "rb") as f:
+                header = f.read(8)
+            if len(header) < 8 or header[4:8] != b"ftyp":
+                media_type = "audio"
+        except Exception:
+            media_type = "audio"
 
         await db.execute(
             "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
