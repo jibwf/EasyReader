@@ -179,6 +179,7 @@ async def get_db() -> aiosqlite.Connection:
         await _db.executescript(SCHEMA)
         await _ensure_media_root_column(_db)
         await _ensure_default_book_categories(_db)
+        await _encode_audiobook_manifests(_db)
         await _db.commit()
     return _db
 
@@ -226,3 +227,39 @@ async def _ensure_media_root_column(db: aiosqlite.Connection):
     columns = {row["name"] for row in await cursor.fetchall()}
     if "media_root" not in columns:
         await db.execute("ALTER TABLE books ADD COLUMN media_root TEXT DEFAULT ''")
+
+
+async def _encode_audiobook_manifests(db: aiosqlite.Connection):
+    """Encode media URLs in audiobook manifests that contain unencoded Chinese chars."""
+    import json as _json
+    from urllib.parse import quote
+
+    cursor = await db.execute(
+        "SELECT id, content FROM chapter_cache WHERE content_type = 'audiobook'"
+    )
+    rows = await cursor.fetchall()
+    updated = 0
+    for row in rows:
+        try:
+            manifest = _json.loads(row["content"])
+            changed = False
+            for mf in manifest.get("media_files", []):
+                url = mf.get("url", "")
+                if "%" not in url and any(ord(c) > 127 for c in url):
+                    parts = url.split("?")
+                    path = parts[0]
+                    query = parts[1] if len(parts) > 1 else ""
+                    segments = path.split("/")
+                    encoded = "/".join(quote(s, safe="") for s in segments)
+                    mf["url"] = f"{encoded}?{query}" if query else encoded
+                    changed = True
+            if changed:
+                await db.execute(
+                    "UPDATE chapter_cache SET content = ? WHERE id = ?",
+                    (_json.dumps(manifest), row["id"]),
+                )
+                updated += 1
+        except Exception:
+            pass
+    if updated:
+        await db.commit()

@@ -3,6 +3,12 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
 
+function safeMediaUrl(url: string): string {
+  if (!url) return "";
+  // encodeURI doesn't re-encode %xx sequences, safe for both encoded and unencoded URLs
+  return encodeURI(url);
+}
+
 export default function AudiobookPlayer() {
   const [params] = useSearchParams();
   const bookKey = params.get("book_key") || "";
@@ -105,8 +111,8 @@ export default function AudiobookPlayer() {
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
 
-  // Media URL is pre-encoded by backend
-  const mediaSrc = currentMedia?.url || "";
+  // Safe encode: handles both pre-encoded and unencoded URLs
+  const mediaSrc = safeMediaUrl(currentMedia?.url || "");
 
   // Media event handlers
   const onMediaError = useCallback(() => {
