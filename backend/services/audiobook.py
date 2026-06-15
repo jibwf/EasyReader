@@ -2,11 +2,15 @@
 
 import io
 import json
+import logging
 import re
 import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 from backend.config import settings
 from backend.database import get_db
@@ -56,6 +60,26 @@ def _encode_media_url(dir_name: str, filename: str) -> str:
     encoded_dir = quote(dir_name, safe="")
     encoded_file = quote(filename, safe="")
     return f"/api/media/{encoded_dir}/{encoded_file}"
+
+
+def _transcode_to_mp4(input_path: Path) -> Path | None:
+    """Transcode a media file to MP4 using ffmpeg. Returns the new path or None on failure."""
+    output_path = input_path.with_suffix(".mp4")
+    if output_path == input_path:
+        output_path = input_path.with_suffix(".transcoded.mp4")
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", str(input_path), "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+             "-y", str(output_path)],
+            capture_output=True, timeout=300,
+        )
+        if result.returncode == 0 and output_path.exists():
+            input_path.unlink()
+            output_path.rename(input_path)
+            return input_path
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.warning("ffmpeg transcoding failed for %s: %s", input_path, e)
+    return None
 
 
 async def scan_audiobooks() -> dict:
@@ -153,6 +177,12 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
+        # Transcode non-MP4 files to MP4 for browser compatibility
+        if _detect_media_type(media_file) == "audio" and media_file.suffix.lower() != ".mp4":
+            transcoded = _transcode_to_mp4(media_file)
+            if transcoded:
+                media_file = transcoded
+
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
         media_type = _detect_media_type(media_file)
@@ -229,6 +259,14 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
+        # Transcode non-MP4 files to MP4 for browser compatibility
+        if _detect_media_type(media_file) == "audio" and media_file.suffix.lower() != ".mp4":
+            transcoded = _transcode_to_mp4(media_file)
+            if transcoded:
+                media_file = transcoded
+                # Update rel_path after potential rename
+                rel_path = media_file.relative_to(audiobook_dir)
+
         # Compute relative path from audiobook folder for URL
         rel_path = media_file.relative_to(audiobook_dir)
         chapter_title = media_file.stem

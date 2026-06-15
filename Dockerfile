@@ -19,6 +19,9 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
 	PYTHONUNBUFFERED=1 \
 	PIP_NO_CACHE_DIR=1
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ffmpeg \
+	&& rm -rf /var/apt/lists/*
 COPY backend/requirements.txt ./requirements.txt
 COPY --from=python-wheels /wheels /wheels
 RUN pip install --no-index --find-links=/wheels -r requirements.txt \
