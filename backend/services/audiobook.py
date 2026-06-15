@@ -6,6 +6,7 @@ import re
 import shutil
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from backend.config import settings
 from backend.database import get_db
@@ -26,6 +27,13 @@ def _natural_sort_key(s: str):
 
 def _media_type_from_ext(ext: str) -> str:
     return "video" if ext.lower() in VIDEO_EXTENSIONS else "audio"
+
+
+def _encode_media_url(dir_name: str, filename: str) -> str:
+    """Encode media URL so browsers can fetch it correctly."""
+    encoded_dir = quote(dir_name, safe="")
+    encoded_file = quote(filename, safe="")
+    return f"/api/media/{encoded_dir}/{encoded_file}"
 
 
 async def scan_audiobooks() -> dict:
@@ -135,7 +143,7 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
         manifest = json.dumps({
             "media_files": [{
                 "filename": media_file.name,
-                "url": f"/api/media/__root__/{media_file.name}",
+                "url": _encode_media_url("__root__", media_file.name),
                 "media_type": media_type,
             }]
         })
@@ -211,7 +219,7 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
         manifest = json.dumps({
             "media_files": [{
                 "filename": media_file.name,
-                "url": f"/api/media/{dir_name}/{media_file.name}",
+                "url": _encode_media_url(dir_name, media_file.name),
                 "media_type": media_type,
             }]
         })
