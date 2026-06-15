@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
 import { useAudiobookHistory } from "@/stores/audiobookHistory";
+import { HeadphonesIcon } from "@/components/icons";
 
 export default function AudiobookPlayer() {
   const [params] = useSearchParams();
@@ -156,7 +157,7 @@ export default function AudiobookPlayer() {
         <span className="text-[14px] font-medium text-[#1d1d1f] truncate flex-1">{bookName}</span>
       </div>
 
-      <div className="pt-14 pb-32 px-4 max-w-2xl mx-auto">
+      <div className="pt-14 pb-32 px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16">
         {currentMedia && (
           currentMedia.media_type === "video" ? (
             <video
@@ -177,18 +178,18 @@ export default function AudiobookPlayer() {
         )}
 
         {!showVideo && (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="w-48 h-48 bg-white/20 rounded-2xl backdrop-blur-sm border border-white/30 flex items-center justify-center mb-6">
+          <div className="flex flex-col items-center justify-center py-8 sm:py-12 md:py-16">
+            <div className="w-48 h-48 sm:w-56 sm:h-56 md:w-64 md:h-64 lg:w-72 lg:h-72 bg-white/20 rounded-2xl backdrop-blur-sm border border-white/30 flex items-center justify-center mb-6">
               {loading ? (
                 <p className="text-[13px] text-white/80">加载中...</p>
               ) : (
-                <span className={`text-6xl ${currentMedia ? "" : "opacity-20"}`}>🎧</span>
+                <HeadphonesIcon size={64} className="text-white/60" />
               )}
             </div>
-            <h2 className="text-xl font-semibold text-white mb-2">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-semibold text-white mb-2 text-center px-4">
               {chapter?.title || "加载中..."}
             </h2>
-            <p className="text-sm text-white/80">
+            <p className="text-sm sm:text-base text-white/80">
               {chapters.length > 0 ? `第 ${currentIdx + 1} / ${chapters.length} 章` : ""}
             </p>
           </div>
