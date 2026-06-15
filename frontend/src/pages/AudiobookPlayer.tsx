@@ -25,32 +25,6 @@ export default function AudiobookPlayer() {
     localStorage.setItem("audiobook-show-video", String(showVideo));
   }, [showVideo]);
 
-  // Reset on book change
-  useEffect(() => {
-    if (!bookKey || bookKey === loadedBookRef.current) return;
-    loadedBookRef.current = bookKey;
-    loadedChapterRef.current = -1;
-    setLoading(true);
-    setError("");
-    setManifest(null);
-    setChapters([]);
-    setCurrentIdx(0);
-    api.getChapters({ bookKey })
-      .then((list) => {
-        setChapters(list);
-        if (list.length > 0) {
-          loadChapter(list[0]);
-        } else {
-          setLoading(false);
-          setError("没有章节");
-        }
-      })
-      .catch((e: unknown) => {
-        setLoading(false);
-        setError(`加载章节失败: ${e instanceof Error ? e.message : "未知错误"}`);
-      });
-  }, [bookKey]);
-
   const loadChapter = useCallback(async (chapter: Chapter) => {
     if (chapter.idx === loadedChapterRef.current) return;
     loadedChapterRef.current = chapter.idx;
@@ -72,6 +46,35 @@ export default function AudiobookPlayer() {
     }
   }, []);
 
+  const loadBook = useCallback(async (key: string) => {
+    if (!key) return;
+    setLoading(true);
+    setError("");
+    setManifest(null);
+    setChapters([]);
+    setCurrentIdx(0);
+    try {
+      const list = await api.getChapters({ bookKey: key });
+      setChapters(list);
+      if (list.length > 0) {
+        await loadChapter(list[0]);
+      } else {
+        setError("没有章节");
+      }
+    } catch (e: unknown) {
+      setError(`加载失败: ${e instanceof Error ? e.message : "未知错误"}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadChapter]);
+
+  useEffect(() => {
+    if (!bookKey || bookKey === loadedBookRef.current) return;
+    loadedBookRef.current = bookKey;
+    loadedChapterRef.current = -1;
+    loadBook(bookKey);
+  }, [bookKey, loadBook]);
+
   const handleChapterChange = useCallback((chapter: Chapter) => {
     const media = mediaRef.current;
     if (media) {
@@ -85,33 +88,12 @@ export default function AudiobookPlayer() {
   const handleRetry = useCallback(() => {
     loadedChapterRef.current = -1;
     loadedBookRef.current = "";
-    if (chapters.length > 0) {
-      loadChapter(chapters[currentIdx] || chapters[0]);
-    } else if (bookKey) {
-      setLoading(true);
-      setError("");
-      api.getChapters({ bookKey })
-        .then((list) => {
-          setChapters(list);
-          if (list.length > 0) loadChapter(list[0]);
-          else setError("没有章节");
-        })
-        .catch((e: unknown) => setError(`加载失败: ${e instanceof Error ? e.message : "未知错误"}`))
-        .finally(() => setLoading(false));
-    }
-  }, [chapters, currentIdx, bookKey, loadChapter]);
+    loadBook(bookKey);
+  }, [bookKey, loadBook]);
 
   const hasVideo = manifest?.media_files.some((f) => f.media_type === "video") ?? false;
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
-
-  // URL is pre-encoded by backend, use as-is
-  const mediaSrc = currentMedia?.url || "";
-
-  // Media event handlers
-  const onMediaError = useCallback(() => {
-    setError("媒体文件加载失败");
-  }, []);
 
   if (!bookKey) {
     return <div className="pt-12 text-center text-[13px] text-[#c7c7cc]">缺少 book_key</div>;
@@ -119,7 +101,6 @@ export default function AudiobookPlayer() {
 
   return (
     <div className="min-h-screen bg-[#fafafa]">
-      {/* Top bar */}
       <div className="fixed top-0 inset-x-0 z-50 flex items-center px-4 py-3 bg-white/90 backdrop-blur-xl border-b border-black/[0.06]">
         <button onClick={() => navigate(-1)} className="text-[13px] text-[#86868b] mr-4">
           ← 返回
@@ -128,49 +109,40 @@ export default function AudiobookPlayer() {
       </div>
 
       <div className="pt-14 pb-32">
-        {/* Always render media element to keep ref attached */}
         {currentMedia && (
           currentMedia.media_type === "video" ? (
             <video
               ref={mediaRef as React.RefObject<HTMLVideoElement>}
-              src={mediaSrc}
+              src={currentMedia.url}
               className={`w-full object-contain ${showVideo ? "aspect-video" : "hidden"}`}
               controls={false}
               playsInline
-              onError={onMediaError}
+              onError={() => setError("媒体文件加载失败")}
             />
           ) : (
             <audio
               ref={mediaRef as React.RefObject<HTMLAudioElement>}
-              src={mediaSrc}
-              onError={onMediaError}
+              src={currentMedia.url}
+              onError={() => setError("媒体文件加载失败")}
             />
           )
         )}
 
-        {/* Cover / placeholder area */}
         {!showVideo && (
           <div className="mx-auto aspect-square max-w-[300px] bg-black/5 flex items-center justify-center">
             {loading ? (
               <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
-            ) : currentMedia ? (
-              <span className="text-[80px]">🎧</span>
             ) : (
-              <span className="text-[80px] opacity-20">🎧</span>
+              <span className={`text-[80px] ${currentMedia ? "" : "opacity-20"}`}>🎧</span>
             )}
           </div>
         )}
         {showVideo && !currentMedia && (
           <div className="mx-auto aspect-video bg-black/5 flex items-center justify-center">
-            {loading ? (
-              <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
-            ) : (
-              <span className="text-[80px] opacity-20">🎧</span>
-            )}
+            <span className="text-[80px] opacity-20">🎧</span>
           </div>
         )}
 
-        {/* Chapter info */}
         <div className="px-4 mt-4 text-center">
           <h2 className="text-[16px] font-medium text-[#1d1d1f]">
             {chapter?.title || "加载中..."}
@@ -180,7 +152,6 @@ export default function AudiobookPlayer() {
           </p>
         </div>
 
-        {/* Error display */}
         {error && (
           <div className="mx-4 mt-4 p-3 rounded-lg bg-red-50 border border-red-200">
             <p className="text-[13px] text-red-600">{error}</p>
@@ -193,7 +164,6 @@ export default function AudiobookPlayer() {
           </div>
         )}
 
-        {/* Controls */}
         {manifest && (
           <div className="mt-6">
             <AudiobookControls
