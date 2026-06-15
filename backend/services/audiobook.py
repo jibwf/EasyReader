@@ -34,7 +34,8 @@ def _media_type_from_ext(ext: str) -> str:
 
 
 # Browser-compatible audio codecs in MP4 container
-_BROWSER_COMPATIBLE_AUDIO = {"aac", "opus", "mp3"}
+# Note: MP3 is NOT reliably supported in MP4 container across browsers
+_BROWSER_COMPATIBLE_AUDIO = {"aac", "opus"}
 # Browser-compatible video codecs
 _BROWSER_COMPATIBLE_VIDEO = {"h264", "vp8", "vp9", "av1"}
 
@@ -62,22 +63,32 @@ def _probe_codecs(file_path: Path) -> tuple[str, str]:
 
 
 def _needs_transcode(file_path: Path) -> bool:
-    """Check if a file needs transcoding for browser compatibility."""
-    # Only check MP4 files — other formats are already handled as audio
-    try:
-        with open(file_path, "rb") as f:
-            header = f.read(8)
-        if len(header) < 8 or header[4:8] != b"ftyp":
-            return False  # Not MP4 container, already handled as audio
-    except Exception:
-        return False
-
+    """Check if a file needs transcoding for browser compatibility.
+    
+    Transcode if:
+    1. MP4 container with incompatible audio codec (e.g. H264+MP3)
+    2. Non-MP4 container (MPEG-TS, etc.) — convert to MP4 for browser playback
+    """
     video_codec, audio_codec = _probe_codecs(file_path)
+    
+    # If we can't determine codecs, check container format
     if not audio_codec:
-        return False  # Can't determine, skip transcoding
-
-    # If audio codec is not browser-compatible, need transcoding
-    return audio_codec.lower() not in _BROWSER_COMPATIBLE_AUDIO
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(8)
+            # MP4 container but no audio detected — might be video-only, skip
+            if len(header) >= 8 and header[4:8] == b"ftyp":
+                return False
+            # Non-MP4 container — needs transcoding to MP4
+            return True
+        except Exception:
+            return False
+    
+    # Check if audio codec is browser-compatible
+    if audio_codec.lower() not in _BROWSER_COMPATIBLE_AUDIO:
+        return True
+    
+    return False
 
 
 def _transcode_to_compatible(file_path: Path) -> Path | None:
