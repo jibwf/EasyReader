@@ -1,5 +1,6 @@
 """Douban cover service — fetch audiobook covers from Douban."""
 
+import hashlib
 import json
 import logging
 import re
@@ -8,6 +9,8 @@ from typing import Optional
 from urllib.parse import quote
 
 import httpx
+
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +26,13 @@ HEADERS = {
 
 
 async def search_douban_cover(book_name: str) -> Optional[str]:
-    """Search Douban for audiobook cover image URL.
+    """Search Douban for audiobook cover and download to local.
     
     Args:
         book_name: Name of the audiobook to search for
         
     Returns:
-        Cover image URL or None if not found
+        Local cover file path or None if not found
     """
     if not book_name or not book_name.strip():
         return None
@@ -68,8 +71,12 @@ async def search_douban_cover(book_name: str) -> Optional[str]:
             if cover_url:
                 # Get large image URL
                 large_url = _get_large_image_url(cover_url)
-                logger.info("Found Douban cover for '%s': %s", book_name, large_url)
-                return large_url
+                
+                # Download to local
+                local_path = await _download_cover(client, large_url, book_name)
+                if local_path:
+                    logger.info("Downloaded Douban cover for '%s': %s", book_name, local_path)
+                    return local_path
             
             return None
             
@@ -78,6 +85,46 @@ async def search_douban_cover(book_name: str) -> Optional[str]:
         return None
     except Exception as e:
         logger.warning("Error fetching Douban cover for '%s': %s", book_name, e)
+        return None
+
+
+async def _download_cover(client: httpx.AsyncClient, url: str, book_name: str) -> Optional[str]:
+    """Download cover image to local file.
+    
+    Args:
+        client: HTTP client
+        url: Image URL to download
+        book_name: Book name for generating filename
+        
+    Returns:
+        Local file path or None if failed
+    """
+    try:
+        response = await client.get(url)
+        
+        if response.status_code != 200:
+            logger.warning("Failed to download cover: HTTP %d", response.status_code)
+            return None
+        
+        # Generate filename based on book name hash
+        name_hash = hashlib.md5(book_name.encode()).hexdigest()[:12]
+        ext = get_cover_extension(url)
+        filename = f"{name_hash}{ext}"
+        
+        # Ensure cover directory exists
+        cover_dir = settings.audiobook_cover_dir
+        cover_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save file
+        file_path = cover_dir / filename
+        with open(file_path, "wb") as f:
+            f.write(response.content)
+        
+        # Return relative path for database storage
+        return f"/api/media/covers/{filename}"
+        
+    except Exception as e:
+        logger.warning("Error downloading cover: %s", e)
         return None
 
 

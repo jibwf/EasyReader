@@ -18,6 +18,28 @@ AUDIO_VIDEO_TYPES = {
     '.mkv': 'video/x-matroska',
 }
 
+IMAGE_TYPES = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+}
+
+
+@router.get("/covers/{filename:path}")
+async def serve_cover(filename: str):
+    """Serve audiobook cover images."""
+    if ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    file_path = settings.audiobook_cover_dir / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Cover not found")
+
+    content_type = IMAGE_TYPES.get(file_path.suffix.lower(), 'application/octet-stream')
+    return FileResponse(path=str(file_path), media_type=content_type)
+
 
 @router.get("/{folder_name}/{filename:path}")
 async def serve_media(folder_name: str, filename: str):

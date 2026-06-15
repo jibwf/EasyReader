@@ -53,6 +53,10 @@ class Settings(BaseSettings):
         return self.data_dir / "audiobooks"
 
     @property
+    def audiobook_cover_dir(self) -> Path:
+        return self.data_dir / "audiobook_covers"
+
+    @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024
 
