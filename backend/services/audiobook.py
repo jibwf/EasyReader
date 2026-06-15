@@ -1,5 +1,6 @@
 """Audiobook service — scan, import, and manage audiobooks."""
 
+import hashlib
 import io
 import json
 import logging
@@ -23,21 +24,32 @@ MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 
 AUDIobook_SOURCE_URL = "local://audiobook"
 
+# Browser-compatible audio codecs in MP4 container
+_BROWSER_COMPATIBLE_AUDIO = {"aac", "opus"}
+
 
 def _natural_sort_key(s: str):
     """Sort strings with embedded numbers naturally."""
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
 
 
-def _media_type_from_ext(ext: str) -> str:
-    return "video" if ext.lower() in VIDEO_EXTENSIONS else "audio"
+def _encode_media_url(dir_name: str, filename: str) -> str:
+    """Encode media URL path segments for browser compatibility."""
+    encoded_dir = quote(dir_name, safe="")
+    encoded_file = quote(filename, safe="")
+    return f"/api/media/{encoded_dir}/{encoded_file}"
 
 
-# Browser-compatible audio codecs in MP4 container
-# Note: MP3 is NOT reliably supported in MP4 container across browsers
-_BROWSER_COMPATIBLE_AUDIO = {"aac", "opus"}
-# Browser-compatible video codecs
-_BROWSER_COMPATIBLE_VIDEO = {"h264", "vp8", "vp9", "av1"}
+def _detect_media_type_from_header(file_path: Path) -> str:
+    """Detect media type from file header: ftyp = video, else = audio."""
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(8)
+        if len(header) >= 8 and header[4:8] == b"ftyp":
+            return "video"
+    except Exception:
+        pass
+    return "audio"
 
 
 def _probe_codecs(file_path: Path) -> tuple[str, str]:
@@ -71,20 +83,16 @@ def _needs_transcode(file_path: Path) -> bool:
     """
     video_codec, audio_codec = _probe_codecs(file_path)
     
-    # If we can't determine codecs, check container format
     if not audio_codec:
         try:
             with open(file_path, "rb") as f:
                 header = f.read(8)
-            # MP4 container but no audio detected — might be video-only, skip
             if len(header) >= 8 and header[4:8] == b"ftyp":
                 return False
-            # Non-MP4 container — needs transcoding to MP4
             return True
         except Exception:
             return False
     
-    # Check if audio codec is browser-compatible
     if audio_codec.lower() not in _BROWSER_COMPATIBLE_AUDIO:
         return True
     
@@ -97,8 +105,8 @@ def _transcode_to_compatible(file_path: Path) -> Path | None:
     try:
         result = subprocess.run(
             ["ffmpeg", "-i", str(file_path),
-             "-c:v", "copy",  # Keep video as-is (H264 is already compatible)
-             "-c:a", "aac", "-b:a", "128k",  # Re-encode audio to AAC
+             "-c:v", "copy",
+             "-c:a", "aac", "-b:a", "128k",
              "-y", str(output_path)],
             capture_output=True, timeout=600,
         )
@@ -107,7 +115,6 @@ def _transcode_to_compatible(file_path: Path) -> Path | None:
             output_path.rename(file_path)
             return file_path
         else:
-            # Clean up failed output
             if output_path.exists():
                 output_path.unlink()
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
@@ -117,11 +124,21 @@ def _transcode_to_compatible(file_path: Path) -> Path | None:
     return None
 
 
-def _encode_media_url(dir_name: str, filename: str) -> str:
-    """Encode media URL so browsers can fetch it correctly."""
-    encoded_dir = quote(dir_name, safe="")
-    encoded_file = quote(filename, safe="")
-    return f"/api/media/{encoded_dir}/{encoded_file}"
+def _process_media_file(media_file: Path, dir_name: str, audiobook_dir: Path) -> dict:
+    """Process a single media file: transcode if needed, generate manifest entry."""
+    if _needs_transcode(media_file):
+        transcoded = _transcode_to_compatible(media_file)
+        if transcoded:
+            media_file = transcoded
+
+    rel_path = media_file.relative_to(audiobook_dir)
+    media_type = _detect_media_type_from_header(media_file)
+
+    return {
+        "filename": media_file.name,
+        "url": _encode_media_url(dir_name, str(rel_path)),
+        "media_type": media_type,
+    }
 
 
 async def scan_audiobooks() -> dict:
@@ -219,36 +236,16 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
-        # Transcode MP4 files with incompatible audio codecs (e.g. H264+MP3)
-        if _needs_transcode(media_file):
-            transcoded = _transcode_to_compatible(media_file)
-            if transcoded:
-                media_file = transcoded
-
+        manifest_entry = _process_media_file(media_file, "__root__", settings.audiobook_dir)
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
-        # Determine media type: MP4 container = video, else = audio
-        media_type = "video"
-        try:
-            with open(media_file, "rb") as f:
-                header = f.read(8)
-            if len(header) < 8 or header[4:8] != b"ftyp":
-                media_type = "audio"
-        except Exception:
-            media_type = "audio"
 
         await db.execute(
             "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
             (book_id, chapter_title, chapter_url, idx),
         )
 
-        manifest = json.dumps({
-            "media_files": [{
-                "filename": media_file.name,
-                "url": _encode_media_url("__root__", media_file.name),
-                "media_type": media_type,
-            }]
-        })
+        manifest = json.dumps({"media_files": [manifest_entry]})
         await db.execute(
             """INSERT INTO chapter_cache
             (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
@@ -309,38 +306,16 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
-        # Transcode MP4 files with incompatible audio codecs (e.g. H264+MP3)
-        if _needs_transcode(media_file):
-            transcoded = _transcode_to_compatible(media_file)
-            if transcoded:
-                media_file = transcoded
-
-        # Compute relative path from audiobook folder for URL
-        rel_path = media_file.relative_to(audiobook_dir)
+        manifest_entry = _process_media_file(media_file, dir_name, audiobook_dir)
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
-        # Determine media type: MP4 container = video, else = audio
-        media_type = "video"
-        try:
-            with open(media_file, "rb") as f:
-                header = f.read(8)
-            if len(header) < 8 or header[4:8] != b"ftyp":
-                media_type = "audio"
-        except Exception:
-            media_type = "audio"
 
         await db.execute(
             "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
             (book_id, chapter_title, chapter_url, idx),
         )
 
-        manifest = json.dumps({
-            "media_files": [{
-                "filename": media_file.name,
-                "url": _encode_media_url(dir_name, str(rel_path)),
-                "media_type": media_type,
-            }]
-        })
+        manifest = json.dumps({"media_files": [manifest_entry]})
         await db.execute(
             """INSERT INTO chapter_cache
             (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
@@ -368,7 +343,7 @@ async def import_audiobook_from_zip(file_name: str, raw_content: bytes) -> dict:
 
     media_entries.sort(key=lambda e: _natural_sort_key(Path(e.filename).name))
 
-    digest = __import__('hashlib').sha1(raw_content).hexdigest()[:12]
+    digest = hashlib.sha1(raw_content).hexdigest()[:12]
     extract_dir = settings.audiobook_dir / digest
     extract_dir.mkdir(parents=True, exist_ok=True)
 
