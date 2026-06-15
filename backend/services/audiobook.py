@@ -177,8 +177,8 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
-        # Transcode non-MP4 files to MP4 for browser compatibility
-        if _detect_media_type(media_file) == "audio" and media_file.suffix.lower() != ".mp4":
+        # Transcode non-MP4-container files to MP4 for browser compatibility
+        if _detect_media_type(media_file) == "audio":
             transcoded = _transcode_to_mp4(media_file)
             if transcoded:
                 media_file = transcoded
@@ -259,12 +259,12 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
-        # Transcode non-MP4 files to MP4 for browser compatibility
-        if _detect_media_type(media_file) == "audio" and media_file.suffix.lower() != ".mp4":
+        # Transcode non-MP4-container files to MP4 for browser compatibility
+        # Check actual file header, not just extension
+        if _detect_media_type(media_file) == "audio":
             transcoded = _transcode_to_mp4(media_file)
             if transcoded:
                 media_file = transcoded
-                # Update rel_path after potential rename
                 rel_path = media_file.relative_to(audiobook_dir)
 
         # Compute relative path from audiobook folder for URL
