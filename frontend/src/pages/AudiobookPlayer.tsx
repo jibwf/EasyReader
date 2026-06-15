@@ -3,6 +3,14 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
 
+function encodeMediaUrl(url: string): string {
+  const parts = url.split("?");
+  const path = parts[0];
+  const query = parts[1] || "";
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  return query ? `${encodedPath}?${query}` : encodedPath;
+}
+
 export default function AudiobookPlayer() {
   const [params] = useSearchParams();
   const bookKey = params.get("book_key") || "";
@@ -17,19 +25,24 @@ export default function AudiobookPlayer() {
   const [showVideo, setShowVideo] = useState(() => {
     return localStorage.getItem("audiobook-show-video") !== "false";
   });
-  const mediaRef = useRef<HTMLVideoElement>(null);
-  const loadedBookRef = useRef<string>("");
+  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
+  const loadedBookRef = useRef("");
+  const loadedChapterRef = useRef(-1);
 
   useEffect(() => {
     localStorage.setItem("audiobook-show-video", String(showVideo));
   }, [showVideo]);
 
+  // Reset on book change
   useEffect(() => {
     if (!bookKey || bookKey === loadedBookRef.current) return;
     loadedBookRef.current = bookKey;
+    loadedChapterRef.current = -1;
     setLoading(true);
     setError("");
     setManifest(null);
+    setChapters([]);
+    setCurrentIdx(0);
     api.getChapters({ bookKey })
       .then((list) => {
         setChapters(list);
@@ -47,6 +60,8 @@ export default function AudiobookPlayer() {
   }, [bookKey]);
 
   const loadChapter = useCallback(async (chapter: Chapter) => {
+    if (chapter.idx === loadedChapterRef.current) return;
+    loadedChapterRef.current = chapter.idx;
     setLoading(true);
     setError("");
     try {
@@ -66,18 +81,21 @@ export default function AudiobookPlayer() {
   }, []);
 
   const handleChapterChange = useCallback((chapter: Chapter) => {
-    if (mediaRef.current) {
-      mediaRef.current.pause();
-      mediaRef.current.currentTime = 0;
+    const media = mediaRef.current;
+    if (media) {
+      media.pause();
+      media.currentTime = 0;
     }
+    loadedChapterRef.current = -1;
     loadChapter(chapter);
   }, [loadChapter]);
 
   const handleRetry = useCallback(() => {
+    loadedChapterRef.current = -1;
+    loadedBookRef.current = "";
     if (chapters.length > 0) {
       loadChapter(chapters[currentIdx] || chapters[0]);
     } else if (bookKey) {
-      loadedBookRef.current = "";
       setLoading(true);
       setError("");
       api.getChapters({ bookKey })
@@ -95,12 +113,21 @@ export default function AudiobookPlayer() {
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
 
+  // Encode media URL for browser compatibility
+  const mediaSrc = currentMedia ? encodeMediaUrl(currentMedia.url) : "";
+
+  // Media event handlers
+  const onMediaError = useCallback(() => {
+    setError("媒体文件加载失败");
+  }, []);
+
   if (!bookKey) {
     return <div className="pt-12 text-center text-[13px] text-[#c7c7cc]">缺少 book_key</div>;
   }
 
   return (
     <div className="min-h-screen bg-[#fafafa]">
+      {/* Top bar */}
       <div className="fixed top-0 inset-x-0 z-50 flex items-center px-4 py-3 bg-white/90 backdrop-blur-xl border-b border-black/[0.06]">
         <button onClick={() => navigate(-1)} className="text-[13px] text-[#86868b] mr-4">
           ← 返回
@@ -109,47 +136,59 @@ export default function AudiobookPlayer() {
       </div>
 
       <div className="pt-14 pb-32">
-        <div className={`mx-auto ${showVideo && hasVideo ? "aspect-video" : "aspect-square max-w-[300px]"} bg-black/5 flex items-center justify-center`}>
-          {loading ? (
-            <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
-          ) : currentMedia ? (
-            showVideo && currentMedia.media_type === "video" ? (
-              <video
-                ref={mediaRef}
-                src={currentMedia.url}
-                className="w-full h-full object-contain"
-                controls={false}
-                playsInline
-              />
-            ) : currentMedia.media_type === "video" ? (
-              <video
-                ref={mediaRef}
-                src={currentMedia.url}
-                className="w-full h-full object-contain"
-                controls={false}
-                playsInline
-                style={{ display: "none" }}
-              />
-            ) : (
-              <>
-                <audio ref={mediaRef} src={currentMedia.url} />
-                <span className="text-[80px]">🎧</span>
-              </>
-            )
+        {/* Always render media element to keep ref attached */}
+        {currentMedia && (
+          currentMedia.media_type === "video" ? (
+            <video
+              ref={mediaRef as React.RefObject<HTMLVideoElement>}
+              src={mediaSrc}
+              className={`w-full object-contain ${showVideo ? "aspect-video" : "hidden"}`}
+              controls={false}
+              playsInline
+              onError={onMediaError}
+            />
           ) : (
-            <span className="text-[80px] opacity-20">🎧</span>
-          )}
-        </div>
+            <audio
+              ref={mediaRef as React.RefObject<HTMLAudioElement>}
+              src={mediaSrc}
+              onError={onMediaError}
+            />
+          )
+        )}
 
+        {/* Cover / placeholder area */}
+        {!showVideo && (
+          <div className="mx-auto aspect-square max-w-[300px] bg-black/5 flex items-center justify-center">
+            {loading ? (
+              <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
+            ) : currentMedia ? (
+              <span className="text-[80px]">🎧</span>
+            ) : (
+              <span className="text-[80px] opacity-20">🎧</span>
+            )}
+          </div>
+        )}
+        {showVideo && !currentMedia && (
+          <div className="mx-auto aspect-video bg-black/5 flex items-center justify-center">
+            {loading ? (
+              <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
+            ) : (
+              <span className="text-[80px] opacity-20">🎧</span>
+            )}
+          </div>
+        )}
+
+        {/* Chapter info */}
         <div className="px-4 mt-4 text-center">
           <h2 className="text-[16px] font-medium text-[#1d1d1f]">
             {chapter?.title || "加载中..."}
           </h2>
           <p className="text-[12px] text-[#86868b] mt-1">
-            第 {currentIdx + 1} / {chapters.length} 章
+            {chapters.length > 0 ? `第 ${currentIdx + 1} / ${chapters.length} 章` : ""}
           </p>
         </div>
 
+        {/* Error display */}
         {error && (
           <div className="mx-4 mt-4 p-3 rounded-lg bg-red-50 border border-red-200">
             <p className="text-[13px] text-red-600">{error}</p>
@@ -162,6 +201,7 @@ export default function AudiobookPlayer() {
           </div>
         )}
 
+        {/* Controls */}
         {manifest && (
           <div className="mt-6">
             <AudiobookControls
