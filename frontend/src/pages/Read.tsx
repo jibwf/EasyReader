@@ -150,6 +150,9 @@ export default function Read() {
         setContentType("manga");
         setMangaImages(res.images);
         setLoading(false);
+      } else if (res.type === "audiobook") {
+        setLoading(false);
+        setLoadError("有声书请在有声书页面打开");
       } else {
         setContentType("novel");
         setMangaImages([]);

@@ -211,7 +211,7 @@ async def test_get_chapter_content_parses_cleans_and_applies_replacement(monkeyp
     monkeypatch.setattr("backend.services.content.get_source", lambda source_url: _async_value(source))
     monkeypatch.setattr("backend.services.content.fetch", lambda url, **kwargs: _async_value(html))
 
-    content = await get_chapter_content("https://source.example/c/1.html", "https://source.example")
+    content, _ = await get_chapter_content("https://source.example/c/1.html", "https://source.example")
 
     assert "广告" not in content
     assert content == "第一段\u00a0正文\n\n第二段正文"
@@ -261,7 +261,7 @@ async def test_get_chapter_content_falls_back_to_server_cache_when_fetch_fails(t
     monkeypatch.setattr("backend.services.content.get_source", lambda source_url: _async_value(source))
     monkeypatch.setattr("backend.services.content.fetch", lambda url, **kwargs: _async_value(""))
 
-    content = await get_chapter_content("https://source.example/c/1.html/", "https://source.example")
+    content, _ = await get_chapter_content("https://source.example/c/1.html/", "https://source.example")
 
     assert content == "server cached chapter"
 

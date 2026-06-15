@@ -95,6 +95,19 @@ export default defineConfig({
               expiration: { maxEntries: 3000, maxAgeSeconds: 2592000 },
             },
           },
+          {
+            // Audiobook media files — CacheFirst with long expiration
+            urlPattern: /\/api\/media\//,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "audiobook-media",
+              expiration: {
+                maxEntries: 200,
+                maxAgeSeconds: 2592000,
+              },
+              rangeRequests: true,
+            },
+          },
         ],
       },
     }),

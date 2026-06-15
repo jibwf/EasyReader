@@ -1,6 +1,6 @@
 # EasyReader 架构文档
 
-更新时间：2026-06-11
+更新时间：2026-06-15
 
 ## 文档目的
 
@@ -31,6 +31,7 @@ flowchart LR
     API --> Cache[data/cache]
     API --> Fonts[data/fonts]
     API --> Exports[data/exports]
+    API --> Audiobooks[data/audiobooks]
 ```
 
 ### 角色边界
@@ -41,6 +42,7 @@ flowchart LR
 | 共享数据 | 书架主数据、服务端缓存、字体、导出 | 展示与调用 | 展示与调用 |
 | 共享状态 | 阅读进度、书签、离线任务状态 | 消费与上报 | 消费与上报 |
 | 阅读交互 | 不负责 | 浏览器阅读体验 | 墨水屏阅读体验 |
+| 有声书 | 媒体文件服务、扫描导入 | 播放器、后台播放、定时关闭 | 不支持 |
 | 设备能力 | 不负责 | 浏览器缓存/PWA 安装 | 刷新模式、实体按键、触控热区 |
 
 边界原则：
@@ -48,15 +50,16 @@ flowchart LR
 - 服务端输出稳定数据与共享状态，不承载客户端 UI 状态机。
 - 客户端负责阅读体验，不负责书源规则执行。
 - PWA 保持在线优先；墨水屏客户端保持本地阅读优先。
+- 有声书模块完全独立，不修改小说/漫画相关代码。
 
 ## 服务端架构
 
-服务端当前应被理解为“共享内容与共享状态中心”，核心上由四层组成：
+服务端当前应被理解为"共享内容与共享状态中心"，核心上由四层组成：
 
 ### 1. 规则与抓取层
 
 - `backend/engine/` 负责书源规则解析、抓取、解析器和脚本引擎。
-- 这一层只解决“如何从书源拿到规范化数据”，不关心客户端 UI。
+- 这一层只解决"如何从书源拿到规范化数据"，不关心客户端 UI。
 
 ### 2. 业务服务层
 
@@ -65,17 +68,21 @@ flowchart LR
 - `backend/services/search.py`：搜索聚合、去重、排序、源健康度、缓存、`fast/full` 模式。
 - `backend/services/sync_manager.py`：阅读进度、书签、离线任务、目录汇总。
 - `backend/services/font_library.py`：字体资源管理。
+- `backend/services/audiobook.py`：有声书扫描导入、ZIP导入、列表、删除。
 
 ### 3. API 路由层
 
 - `backend/routers/` 对外暴露 `/api/*`。
 - 路由层只做协议和参数边界，不承担核心业务判断。
+- `backend/routers/audiobook.py`：有声书管理 API（scan/import-zip/list/delete）。
+- `backend/routers/media.py`：媒体文件流式传输（支持 Range 请求）。
 
 ### 4. 存储与任务层
 
 - `backend/database.py` 定义 SQLite schema。
 - SQLite 同时承担书架、同步、任务和缓存元数据存储。
 - 离线任务由同进程后台任务执行，并把状态落库供轮询读取。
+- 有声书媒体文件存储在 `data/audiobooks/` 目录下，每个文件夹 = 一本书。
 
 ### 服务端核心架构约束
 
@@ -83,26 +90,30 @@ flowchart LR
 - 搜索输出的是服务端聚合后的结果，不把排序与去重职责下放给客户端。
 - 同步以 `user_id + book_key` 为共享进度主键。
 - 离线缓存使用后台任务模型，而不是请求内同步执行模型。
+- 有声书模块完全独立，不修改小说/漫画相关代码。
 
 ## Web PWA 架构
 
-Web PWA 当前是一个“在线优先 + 本地缓存增强”的客户端，核心分成四层：
+Web PWA 当前是一个"在线优先 + 本地缓存增强"的客户端，核心分成四层：
 
 ### 1. 页面与状态层
 
 - `frontend/src/pages/` 负责书架、搜索、阅读、设置、离线目录等页面。
+- `frontend/src/pages/Audiobook.tsx`：有声书列表页（扫描+ZIP上传）。
+- `frontend/src/pages/AudiobookPlayer.tsx`：有声书播放器页面。
 - `frontend/src/stores/` 负责全局状态与流式搜索结果合并。
 
 ### 2. API 访问层
 
 - `frontend/src/api/client.ts` 统一封装请求头、超时、身份查询参数与请求模型。
-- PWA 通过这层消费服务端搜索、内容、同步、离线任务和字体接口。
+- PWA 通过这层消费服务端搜索、内容、同步、离线任务、字体和有声书接口。
 
 ### 3. 本地缓存层
 
 - `frontend/src/utils/chapter-cache.ts` 负责 IndexedDB 章节缓存。
 - `frontend/src/utils/local-cache.ts` 负责本地快照缓存。
 - `frontend/vite.config.ts` 中的 Workbox runtime caching 提供浏览器缓存兜底。
+- 有声书媒体文件使用 CacheFirst 策略缓存，支持 Range 请求。
 
 ### 4. 阅读与同步层
 
@@ -110,11 +121,67 @@ Web PWA 当前是一个“在线优先 + 本地缓存增强”的客户端，核
 - `frontend/src/utils/sync-queue.ts` 负责按 `user_id + book_key` 收敛的进度补传队列。
 - 搜索页通过 `fast/full` 双模式消费服务端流式搜索能力。
 
+### 有声书播放层
+
+- `frontend/src/components/reader/AudiobookControls.tsx`：播放控制组件（播放/暂停、进度、速度、定时关闭）。
+- 支持音频和视频格式混合播放，视频可切换到纯音频模式。
+- MediaSession API 集成，支持后台播放和通知栏控制。
+- 定时关闭功能：15/30/45/60/90 分钟选项，倒计时结束自动暂停。
+
 ### PWA 架构约束
 
 - 阅读体验由浏览器本地状态驱动，不把滚动锚点、菜单状态等 UI 细节回写到服务端。
 - 本地缓存是增强层，不替代服务端作为共享数据与共享状态的权威源。
 - PWA 不实现书源规则，不在客户端重做搜索排序与去重。
+- 有声书模块完全独立，不修改小说/漫画相关代码。
+
+## 有声书模块架构
+
+有声书是一个完全独立的功能模块，与小说/漫画模块并列。
+
+### 模块边界
+
+```
+有声书模块（独立）
+├── backend/
+│   ├── routers/audiobook.py      # 有声书 API 路由
+│   ├── routers/media.py           # 媒体文件服务
+│   └── services/audiobook.py      # 有声书业务逻辑
+├── frontend/
+│   ├── pages/Audiobook.tsx        # 有声书主页面
+│   ├── pages/AudiobookPlayer.tsx  # 有声书播放页面
+│   └── components/reader/
+│       └── AudiobookControls.tsx  # 播放控制组件
+```
+
+### 导入方式
+
+1. **磁盘扫描**：用户将有声书文件夹放到 `data/audiobooks/` 目录，调用 `POST /api/audiobook/scan` 扫描导入。
+2. **ZIP 上传**：通过 `POST /api/audiobook/import-zip` 上传 ZIP 包，自动解压到 `data/audiobooks/` 目录。
+
+### 文件结构
+
+- 每个文件夹 = 一本书
+- 文件夹内文件按文件名自然排序作为章节
+- 文件名（去掉扩展名）作为章节标题
+- 支持音频格式：mp3, m4a, wav, ogg, flac
+- 支持视频格式：mp4, webm, mkv
+
+### 数据存储
+
+- `books` 表：`source_url='local://audiobook'`，`media_root` 存储文件夹名
+- `chapters` 表：正常存储章节索引
+- `chapter_cache` 表：`content_type='audiobook'`，`content` 存储媒体 URL JSON
+
+### API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/audiobook/scan` | 扫描磁盘导入新有声书 |
+| POST | `/api/audiobook/import-zip` | 从 ZIP 导入有声书 |
+| GET | `/api/audiobook/list` | 获取有声书列表 |
+| DELETE | `/api/audiobook/{book_id}` | 删除有声书 |
+| GET | `/api/media/{folder}/{file}` | 媒体文件流式传输 |
 
 ## 共享 API 约束
 
@@ -155,7 +222,7 @@ API 约束只记录多客户端共同依赖的规则，不展开阶段状态与�
 
 - `/api/content/book-info` 与 `/api/content/chapters` 支持 `book_key` 查询。
 - `/api/content/chapter` 当前以 `url + source_url` 定位章节内容。
-- 服务端负责把正文归一为小说文本或漫画图片列表；客户端负责渲染。
+- 服务端负责把正文归一为小说文本、漫画图片列表或有声书 manifest；客户端负责渲染。
 
 ### 同步约束
 

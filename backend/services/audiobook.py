@@ -1,0 +1,212 @@
+"""Audiobook service — scan, import, and manage audiobooks."""
+
+import io
+import json
+import re
+import shutil
+import zipfile
+from pathlib import Path
+
+from backend.config import settings
+from backend.database import get_db
+from backend.models.book import BookSchema
+from backend.utils.book_key import build_book_key
+
+AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.wav', '.ogg', '.flac'}
+VIDEO_EXTENSIONS = {'.mp4', '.webm', '.mkv'}
+MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
+
+AUDIobook_SOURCE_URL = "local://audiobook"
+
+
+def _natural_sort_key(s: str):
+    """Sort strings with embedded numbers naturally."""
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
+
+
+def _media_type_from_ext(ext: str) -> str:
+    return "video" if ext.lower() in VIDEO_EXTENSIONS else "audio"
+
+
+async def scan_audiobooks() -> dict:
+    """Scan audiobook_dir for new audiobook folders and import them."""
+    audiobook_dir = settings.audiobook_dir
+    if not audiobook_dir.exists():
+        return {"scanned": 0, "imported": 0, "skipped": 0}
+
+    entries = [e for e in audiobook_dir.iterdir() if e.is_dir()]
+    imported = 0
+    skipped = 0
+
+    db = await get_db()
+    for entry in sorted(entries, key=lambda e: _natural_sort_key(e.name)):
+        folder_name = entry.name
+        cursor = await db.execute(
+            "SELECT id FROM books WHERE media_root = ? AND source_url = ?",
+            (folder_name, AUDIobook_SOURCE_URL),
+        )
+        if await cursor.fetchone():
+            skipped += 1
+            continue
+
+        result = await import_audiobook_from_dir(folder_name)
+        if result:
+            imported += 1
+
+    return {"scanned": len(entries), "imported": imported, "skipped": skipped}
+
+
+async def import_audiobook_from_dir(dir_name: str) -> dict | None:
+    """Import a single audiobook folder from audiobook_dir."""
+    audiobook_dir = settings.audiobook_dir / dir_name
+    if not audiobook_dir.exists() or not audiobook_dir.is_dir():
+        return None
+
+    media_files = [
+        f for f in audiobook_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS
+    ]
+    if not media_files:
+        return None
+
+    media_files.sort(key=lambda f: _natural_sort_key(f.name))
+
+    book_url = f"{AUDIobook_SOURCE_URL}/{dir_name}"
+    source_url = AUDIobook_SOURCE_URL
+    book_key = build_book_key(source_url, book_url)
+
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO books
+        (book_key, name, author, cover_url, intro, book_url, source_url,
+         category_name, total_chapters, media_root, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(book_key) DO UPDATE SET
+            total_chapters = excluded.total_chapters,
+            media_root = excluded.media_root,
+            updated_at = excluded.updated_at""",
+        (
+            book_key,
+            dir_name,
+            "",
+            "",
+            "",
+            book_url,
+            source_url,
+            "有声书",
+            len(media_files),
+            dir_name,
+        ),
+    )
+
+    book_id = await _get_book_id(db, book_url, source_url)
+
+    await db.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
+    await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
+
+    for idx, media_file in enumerate(media_files):
+        chapter_title = media_file.stem
+        chapter_url = f"{book_url}#{idx}"
+        media_type = _media_type_from_ext(media_file.suffix)
+
+        await db.execute(
+            "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
+            (book_id, chapter_title, chapter_url, idx),
+        )
+
+        manifest = json.dumps({
+            "media_files": [{
+                "filename": media_file.name,
+                "url": f"/api/media/{dir_name}/{media_file.name}",
+                "media_type": media_type,
+            }]
+        })
+        await db.execute(
+            """INSERT INTO chapter_cache
+            (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
+            VALUES (?, ?, ?, ?, ?, 'audiobook')""",
+            (book_id, idx, chapter_title, chapter_url, manifest),
+        )
+
+    await db.commit()
+    return {"book_id": book_id, "name": dir_name, "chapters": len(media_files)}
+
+
+async def import_audiobook_from_zip(file_name: str, raw_content: bytes) -> dict:
+    """Import an audiobook from a ZIP file."""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw_content))
+    except zipfile.BadZipFile:
+        raise ValueError("Invalid ZIP file")
+
+    media_entries = [
+        info for info in zf.infolist()
+        if not info.is_dir() and Path(info.filename).suffix.lower() in MEDIA_EXTENSIONS
+    ]
+    if not media_entries:
+        raise ValueError("ZIP contains no supported media files")
+
+    media_entries.sort(key=lambda e: _natural_sort_key(Path(e.filename).name))
+
+    digest = __import__('hashlib').sha1(raw_content).hexdigest()[:12]
+    extract_dir = settings.audiobook_dir / digest
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    for entry in media_entries:
+        target = extract_dir / Path(entry.filename).name
+        with zf.open(entry) as src, open(target, 'wb') as dst:
+            shutil.copyfileobj(src, dst)
+
+    result = await import_audiobook_from_dir(digest)
+    if not result:
+        raise RuntimeError("Failed to import audiobook from ZIP")
+    return result
+
+
+async def list_audiobooks() -> list[BookSchema]:
+    """Get all audiobooks."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT * FROM books WHERE source_url = ? ORDER BY updated_at DESC""",
+        (AUDIobook_SOURCE_URL,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        BookSchema(
+            id=row["id"],
+            book_key=row["book_key"] or "",
+            name=row["name"],
+            author=row["author"] or "",
+            cover_url=row["cover_url"] or "",
+            intro=row["intro"] or "",
+            book_url=row["book_url"],
+            source_url=row["source_url"],
+            category_name=row["category_name"] or "有声书",
+            last_chapter=row["last_chapter"] or "",
+            total_chapters=row["total_chapters"] or 0,
+            media_root=row["media_root"] or "",
+            added_at=row["added_at"] or "",
+            updated_at=row["updated_at"] or "",
+        )
+        for row in rows
+    ]
+
+
+async def delete_audiobook(book_id: int) -> bool:
+    """Delete an audiobook record. Does not delete disk files."""
+    db = await get_db()
+    cursor = await db.execute(
+        "DELETE FROM books WHERE id = ? AND source_url = ?",
+        (book_id, AUDIobook_SOURCE_URL),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def _get_book_id(db, book_url: str, source_url: str) -> int:
+    cursor = await db.execute(
+        "SELECT id FROM books WHERE book_url = ? AND source_url = ?",
+        (book_url, source_url),
+    )
+    row = await cursor.fetchone()
+    return row["id"]

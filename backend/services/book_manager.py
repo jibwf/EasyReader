@@ -454,7 +454,7 @@ async def ensure_book_cached(book_id: int) -> dict:
     success = len(chapters) - len(missing_chapters)
 
     async def fetch_missing(chapter_row):
-        content = await get_chapter_content(chapter_row["url"], book["source_url"])
+        content, _ = await get_chapter_content(chapter_row["url"], book["source_url"])
         return chapter_row, content
 
     failed_titles = []

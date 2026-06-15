@@ -59,7 +59,7 @@ async def test_local_txt_import_can_be_read_via_content_service(tmp_path, monkey
     chapters = await get_chapters(row["book_url"], row["source_url"])
     assert len(chapters) == 1
 
-    content = await get_chapter_content(chapters[0].url, row["source_url"])
+    content, _ = await get_chapter_content(chapters[0].url, row["source_url"])
     assert "这是正文" in content
 
 
@@ -81,7 +81,7 @@ async def test_local_txt_import_supports_gb18030_encoding(tmp_path):
     chapters = await get_chapters(row["book_url"], row["source_url"])
     assert len(chapters) == 1
 
-    content = await get_chapter_content(chapters[0].url, row["source_url"])
+    content, _ = await get_chapter_content(chapters[0].url, row["source_url"])
     assert "GB18030编码正文" in content
     assert "乱码" in content
 
@@ -118,8 +118,8 @@ async def test_local_txt_import_splits_multiple_chapters(tmp_path):
     chapters = await get_chapters(row["book_url"], row["source_url"])
     assert [chapter.title for chapter in chapters] == ["第一章 起风了", "第二章 雨将至"]
 
-    first_content = await get_chapter_content(chapters[0].url, row["source_url"])
-    second_content = await get_chapter_content(chapters[1].url, row["source_url"])
+    first_content, _ = await get_chapter_content(chapters[0].url, row["source_url"])
+    second_content, _ = await get_chapter_content(chapters[1].url, row["source_url"])
     assert "第一章正文" in first_content
     assert "第二章正文" in second_content
 
@@ -155,8 +155,8 @@ async def test_local_txt_import_supports_parenthesized_chapter_titles(tmp_path):
     chapters = await get_chapters(row["book_url"], row["source_url"])
     assert [chapter.title for chapter in chapters] == ["（1）初战", "（三）"]
 
-    first_content = await get_chapter_content(chapters[0].url, row["source_url"])
-    second_content = await get_chapter_content(chapters[1].url, row["source_url"])
+    first_content, _ = await get_chapter_content(chapters[0].url, row["source_url"])
+    second_content, _ = await get_chapter_content(chapters[1].url, row["source_url"])
     assert "初战正文" in first_content
     assert "第三部分正文" in second_content
 
@@ -272,8 +272,8 @@ async def test_export_book_requires_cache_then_generates_txt(tmp_path, monkeypat
     )
     await db.commit()
 
-    async def fake_get_chapter_content(chapter_url: str, source_url: str) -> str:
-        return "缓存后的章节正文"
+    async def fake_get_chapter_content(chapter_url: str, source_url: str) -> tuple[str, str]:
+        return "缓存后的章节正文", "novel"
 
     monkeypatch.setattr("backend.services.book_manager.get_chapter_content", fake_get_chapter_content)
 

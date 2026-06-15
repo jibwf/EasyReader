@@ -10,7 +10,7 @@ type InstallPromptMode = "deferred" | "manual" | "ios";
 
 const tabs = [
   { to: "/", label: "首页", mobileLabel: "首页" },
-  { to: "/manga", label: "漫画", mobileLabel: "漫画" },
+  { to: "/audiobook", label: "有声书", mobileLabel: "有声书" },
   { to: "/shelf", label: "书架", mobileLabel: "书架" },
   { to: "/settings", label: "设置", mobileLabel: "设置" },
 ];

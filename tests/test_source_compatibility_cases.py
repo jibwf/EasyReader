@@ -49,7 +49,7 @@ async def test_legado_compatibility_cases_cover_search_toc_and_content(case, mon
     monkeypatch.setattr("backend.services.content.fetch", fake_content_fetch)
 
     chapters = await get_chapters(case["book_url"], source.bookSourceUrl)
-    content = await get_chapter_content(case["chapter_url"], source.bookSourceUrl)
+    content, _ = await get_chapter_content(case["chapter_url"], source.bookSourceUrl)
 
     assert [chapter.title for chapter in chapters] == case["expected"]["chapter_titles"]
     assert content == case["expected"]["content"]

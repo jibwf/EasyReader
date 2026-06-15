@@ -613,8 +613,62 @@ export const api = {
 
     return (await res.json()) as BackupRestoreResponse;
   },
+
+  scanAudiobooks: () =>
+    request<{ scanned: number; imported: number; skipped: number }>("/audiobook/scan", {
+      method: "POST",
+    }),
+
+  getAudiobookList: () => request<AudiobookItem[]>("/audiobook/list"),
+
+  importAudiobookZip: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/audiobook/import-zip`, {
+      method: "POST",
+      headers: buildHeaders({ body: form }),
+      body: form,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`API error: ${res.status}`);
+    }
+    return res.json();
+  },
+
+  deleteAudiobook: (bookId: number) =>
+    request<{ deleted: boolean }>(`/audiobook/${bookId}`, {
+      method: "DELETE",
+    }),
 };
 
 export type ChapterContent =
   | { type: "novel"; content: string }
-  | { type: "manga"; images: string[] };
+  | { type: "manga"; images: string[] }
+  | { type: "audiobook"; manifest: AudiobookManifest };
+
+export interface AudiobookMediaFile {
+  filename: string;
+  url: string;
+  media_type: "audio" | "video";
+}
+
+export interface AudiobookManifest {
+  media_files: AudiobookMediaFile[];
+}
+
+export interface AudiobookItem {
+  id: number;
+  book_key: string;
+  name: string;
+  author: string;
+  cover_url: string;
+  intro: string;
+  book_url: string;
+  source_url: string;
+  category_name: string;
+  total_chapters: number;
+  media_root: string;
+  added_at: string;
+  updated_at: string;
+}

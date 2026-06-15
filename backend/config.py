@@ -49,6 +49,10 @@ class Settings(BaseSettings):
         return self.data_dir / "fonts"
 
     @property
+    def audiobook_dir(self) -> Path:
+        return self.data_dir / "audiobooks"
+
+    @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024
 

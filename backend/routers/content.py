@@ -47,9 +47,17 @@ async def chapter_content(
     url: str = Query(...),
     source_url: str = Query(...),
 ):
-    content = await get_chapter_content(url, source_url)
+    content, content_type = await get_chapter_content(url, source_url)
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
+
+    # Audiobook: return manifest directly
+    if content_type == "audiobook":
+        try:
+            manifest = json.loads(content)
+            return {"type": "audiobook", "manifest": manifest}
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     # Check if content is a JSON array of image URLs (from Tauri manga sources)
     if content.strip().startswith("["):

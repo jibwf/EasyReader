@@ -26,6 +26,7 @@ class BookSchema(BaseModel):
     category_name: str = DEFAULT_BOOK_CATEGORY_NAME
     last_chapter: str = ""
     total_chapters: int = 0
+    media_root: str = ""
     server_cached_chapters: int = 0
     added_at: str = ""
     updated_at: str = ""

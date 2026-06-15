@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
 from backend.database import close_db, get_db
-from backend.routers import auth, backup, books, content, explore, fonts, offline, proxy, search, sources, sync
+from backend.routers import auth, audiobook, backup, books, content, explore, fonts, media, offline, proxy, search, sources, sync
 from backend.services.sync_manager import bootstrap_offline_task_worker, shutdown_offline_task_worker
 
 VERSION_PATTERN = re.compile(r"^\d{8}\d+$")
@@ -95,12 +95,14 @@ async def security_headers(request: Request, call_next):
 
 
 app.include_router(auth.router)
+app.include_router(audiobook.router)
 app.include_router(sources.router)
 app.include_router(search.router)
 app.include_router(content.router)
 app.include_router(books.router)
 app.include_router(explore.router)
 app.include_router(proxy.router)
+app.include_router(media.router)
 app.include_router(sync.router)
 app.include_router(offline.router)
 app.include_router(fonts.router)

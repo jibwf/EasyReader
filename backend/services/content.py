@@ -367,38 +367,40 @@ async def _fetch_next_toc(
 async def get_chapter_content(
     chapter_url: str,
     source_url: str,
-) -> str:
-    """Fetch and parse chapter text content."""
+) -> tuple[str, str]:
+    """Fetch and parse chapter text content. Returns (content, content_type)."""
     if source_url.startswith("local://"):
         db = await get_db()
         cursor = await db.execute(
-            "SELECT content FROM chapter_cache WHERE chapter_url = ? ORDER BY id DESC LIMIT 1",
+            "SELECT content, content_type FROM chapter_cache WHERE chapter_url = ? ORDER BY id DESC LIMIT 1",
             (chapter_url,),
         )
         row = await cursor.fetchone()
-        return row["content"] if row else ""
+        if row:
+            return row["content"], row["content_type"]
+        return "", "novel"
 
     raw = await get_source_raw(source_url)
     if raw and raw[1] == "tauri":
         text = await _get_chapter_content_tauri(raw[0], source_url, chapter_url)
         if text:
-            return text
-        return await _get_cached_chapter_content(chapter_url)
+            return text, "novel"
+        return await _get_cached_chapter_content(chapter_url), "novel"
 
     source = await get_source(source_url)
     if not source:
-        return ""
+        return "", "novel"
 
     parser = RuleParser()
     headers = parse_headers(source.header)
     rule_content = source.ruleContent
 
     if not rule_content.content:
-        return ""
+        return "", "novel"
 
     content = await fetch(chapter_url, headers=headers)
     if not content:
-        return await _get_cached_chapter_content(chapter_url)
+        return await _get_cached_chapter_content(chapter_url), "novel"
 
     text = parser.parse(rule_content.content, content, chapter_url)
     if isinstance(text, list):
@@ -424,8 +426,8 @@ async def get_chapter_content(
     # Clean up
     text = _clean_content(text)
     if text:
-        return text
-    return await _get_cached_chapter_content(chapter_url)
+        return text, "novel"
+    return await _get_cached_chapter_content(chapter_url), "novel"
 
 
 async def _get_cached_chapter_content(chapter_url: str) -> str:

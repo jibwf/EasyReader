@@ -37,6 +37,7 @@ Browser / PWA      ->  FastAPI  -> SQLite
 E-link Android     ->  FastAPI  -> data/cache
                                 -> data/exports
                                 -> data/fonts
+                                -> data/audiobooks
 ```
 
 ## 当前已完成功能
@@ -52,6 +53,7 @@ E-link Android     ->  FastAPI  -> data/cache
 - ✅ 服务端快照备份下载与上传恢复接口（全量/增量 + 冲突策略）。
 - ✅ **密码认证系统**：`READER_PASSWORD` 环境变量，Token 90天有效。
 - ✅ **安全加固**：文件上传限制（200MB/3000项）、CORS 可配置、内存泄漏修复。
+- ✅ **有声书服务**：扫描导入、ZIP 导入、列表查询、删除、媒体文件流式传输（Range 请求支持）。
 
 ### Web PWA 已完成
 
@@ -62,6 +64,7 @@ E-link Android     ->  FastAPI  -> data/cache
 - ✅ 进度冲突提示与 `book_key` 去重补传队列。
 - ✅ 设置页支持备份下载与上传恢复，并可选择恢复模式和冲突策略。
 - ✅ **登录对话框**：首次访问输入密码，Token 保存到 localStorage。
+- ✅ **有声书模块**：独立的功能模块，支持磁盘扫描和 ZIP 导入，音频/视频混合播放，MediaSession 后台播放，定时关闭功能。
 
 ### 墨水屏客户端当前已完成
 

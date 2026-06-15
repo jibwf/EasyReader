@@ -7,6 +7,8 @@ import BookDetail from "./pages/BookDetail";
 import Read from "./pages/Read";
 import Shelf from "./pages/Shelf";
 import Manga from "./pages/Manga";
+import Audiobook from "./pages/Audiobook";
+import AudiobookPlayer from "./pages/AudiobookPlayer";
 import OfflineCatalog from "./pages/OfflineCatalog";
 import Settings from "./pages/Settings";
 import { LoginDialog } from "./components/LoginDialog";
@@ -87,6 +89,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
         <Route path="/manga" element={<Manga />} />
+        <Route path="/audiobook" element={<Audiobook />} />
         <Route path="/shelf" element={<Shelf />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/offline-catalog" element={<OfflineCatalog />} />
@@ -94,6 +97,7 @@ export default function App() {
         <Route path="/book" element={<BookDetail />} />
       </Route>
       <Route path="/read" element={<Read />} />
+      <Route path="/audiobook/play" element={<AudiobookPlayer />} />
     </Routes>
   );
 }

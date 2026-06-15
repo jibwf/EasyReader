@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS books (
     category_name TEXT DEFAULT '网文',
     last_chapter TEXT DEFAULT '',
     total_chapters INTEGER DEFAULT 0,
+    media_root TEXT DEFAULT '',
     added_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE(book_key)
@@ -176,6 +177,7 @@ async def get_db() -> aiosqlite.Connection:
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
         await _db.executescript(SCHEMA)
+        await _ensure_media_root_column(_db)
         await _ensure_default_book_categories(_db)
         await _db.commit()
     return _db
@@ -199,8 +201,13 @@ async def _ensure_default_book_categories(db: aiosqlite.Connection):
         (name, hidden, preset, created_at, updated_at)
         VALUES ('出版', 0, 1, datetime('now'), datetime('now'))"""
     )
+    await db.execute(
+        """INSERT OR IGNORE INTO book_categories
+        (name, hidden, preset, created_at, updated_at)
+        VALUES ('有声书', 0, 1, datetime('now'), datetime('now'))"""
+    )
 
-    await db.execute("UPDATE book_categories SET preset = 1 WHERE name IN ('网文', '出版')")
+    await db.execute("UPDATE book_categories SET preset = 1 WHERE name IN ('网文', '出版', '有声书')")
 
     await db.execute(
         "UPDATE books SET category_name = '网文' WHERE category_name IS NULL OR TRIM(category_name) = ''"
@@ -212,3 +219,10 @@ async def _ensure_default_book_categories(db: aiosqlite.Connection):
         FROM books
         WHERE category_name IS NOT NULL AND TRIM(category_name) <> ''"""
     )
+
+
+async def _ensure_media_root_column(db: aiosqlite.Connection):
+    cursor = await db.execute("PRAGMA table_info(books)")
+    columns = {row["name"] for row in await cursor.fetchall()}
+    if "media_root" not in columns:
+        await db.execute("ALTER TABLE books ADD COLUMN media_root TEXT DEFAULT ''")
