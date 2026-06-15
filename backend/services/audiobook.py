@@ -29,17 +29,25 @@ def _media_type_from_ext(ext: str) -> str:
 
 
 async def scan_audiobooks() -> dict:
-    """Scan audiobook_dir for new audiobook folders and import them."""
+    """Scan audiobook_dir for new audiobook folders and import them.
+
+    Supports two layouts:
+    1. Each subfolder is one book: data/audiobooks/书名/001.mp3
+    2. Root-level media files form one book: data/audiobooks/001.mp3
+    """
     audiobook_dir = settings.audiobook_dir
     if not audiobook_dir.exists():
+        audiobook_dir.mkdir(parents=True, exist_ok=True)
         return {"scanned": 0, "imported": 0, "skipped": 0}
 
-    entries = [e for e in audiobook_dir.iterdir() if e.is_dir()]
     imported = 0
     skipped = 0
 
     db = await get_db()
-    for entry in sorted(entries, key=lambda e: _natural_sort_key(e.name)):
+
+    # Scan subfolders as individual books
+    subfolders = [e for e in audiobook_dir.iterdir() if e.is_dir()]
+    for entry in sorted(subfolders, key=lambda e: _natural_sort_key(e.name)):
         folder_name = entry.name
         cursor = await db.execute(
             "SELECT id FROM books WHERE media_root = ? AND source_url = ?",
@@ -53,7 +61,93 @@ async def scan_audiobooks() -> dict:
         if result:
             imported += 1
 
-    return {"scanned": len(entries), "imported": imported, "skipped": skipped}
+    # Also check for root-level media files (treat as a single book)
+    root_media = [
+        f for f in audiobook_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS
+    ]
+    if root_media:
+        root_marker = "__root__"
+        cursor = await db.execute(
+            "SELECT id FROM books WHERE media_root = ? AND source_url = ?",
+            (root_marker, AUDIobook_SOURCE_URL),
+        )
+        if not await cursor.fetchone():
+            result = await _import_root_level_audiobook(root_media)
+            if result:
+                imported += 1
+        else:
+            skipped += 1
+
+    return {"scanned": len(subfolders) + (1 if root_media else 0), "imported": imported, "skipped": skipped}
+
+
+async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
+    """Import root-level media files as a single audiobook."""
+    media_files.sort(key=lambda f: _natural_sort_key(f.name))
+
+    book_url = f"{AUDIobook_SOURCE_URL}/__root__"
+    source_url = AUDIobook_SOURCE_URL
+    book_key = build_book_key(source_url, book_url)
+
+    # Derive book name from parent directory
+    book_name = settings.audiobook_dir.name
+
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO books
+        (book_key, name, author, cover_url, intro, book_url, source_url,
+         category_name, total_chapters, media_root, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(book_key) DO UPDATE SET
+            total_chapters = excluded.total_chapters,
+            media_root = excluded.media_root,
+            updated_at = excluded.updated_at""",
+        (
+            book_key,
+            book_name,
+            "",
+            "",
+            "",
+            book_url,
+            source_url,
+            "有声书",
+            len(media_files),
+            "__root__",
+        ),
+    )
+
+    book_id = await _get_book_id(db, book_url, source_url)
+
+    await db.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
+    await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
+
+    for idx, media_file in enumerate(media_files):
+        chapter_title = media_file.stem
+        chapter_url = f"{book_url}#{idx}"
+        media_type = _media_type_from_ext(media_file.suffix)
+
+        await db.execute(
+            "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
+            (book_id, chapter_title, chapter_url, idx),
+        )
+
+        manifest = json.dumps({
+            "media_files": [{
+                "filename": media_file.name,
+                "url": f"/api/media/__root__/{media_file.name}",
+                "media_type": media_type,
+            }]
+        })
+        await db.execute(
+            """INSERT INTO chapter_cache
+            (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
+            VALUES (?, ?, ?, ?, ?, 'audiobook')""",
+            (book_id, idx, chapter_title, chapter_url, manifest),
+        )
+
+    await db.commit()
+    return {"book_id": book_id, "name": book_name, "chapters": len(media_files)}
 
 
 async def import_audiobook_from_dir(dir_name: str) -> dict | None:
