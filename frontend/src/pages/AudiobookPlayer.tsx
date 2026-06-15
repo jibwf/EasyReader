@@ -156,7 +156,7 @@ export default function AudiobookPlayer() {
         <span className="text-[14px] font-medium text-[#1d1d1f] truncate flex-1">{bookName}</span>
       </div>
 
-      <div className="pt-14 pb-32 px-4 max-w-md mx-auto">
+      <div className="pt-14 pb-32 px-4 max-w-2xl mx-auto">
         {currentMedia && (
           currentMedia.media_type === "video" ? (
             <video

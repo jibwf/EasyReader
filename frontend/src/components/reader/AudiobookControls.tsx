@@ -1,5 +1,18 @@
 import { useRef, useState, useEffect, useCallback, type RefObject } from "react";
 import type { Chapter } from "@/api/client";
+import {
+  PlayIcon,
+  PauseIcon,
+  SkipBackIcon,
+  SkipForwardIcon,
+  RewindIcon,
+  FastForwardIcon,
+  TimerIcon,
+  SpeedIcon,
+  VideoIcon,
+  ListIcon,
+  HeartIcon,
+} from "@/components/icons";
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const SLEEP_TIMER_OPTIONS = [
@@ -247,34 +260,34 @@ export default function AudiobookControls({
         <button
           onClick={() => { const prev = chapters.find((ch) => ch.idx === currentIdx - 1); if (prev) onChapterChange(prev); }}
           disabled={!hasPrev}
-          className="text-white/80 text-2xl disabled:opacity-30"
+          className="text-white/80 disabled:opacity-30 p-2"
         >
-          ⏮
+          <SkipBackIcon size={28} />
         </button>
         <button
           onClick={() => seekBy(-15)}
-          className="text-white/80 text-lg"
+          className="text-white/80 p-2"
         >
-          ⏪15
+          <RewindIcon size={24} />
         </button>
         <button
           onClick={togglePlay}
-          className="bg-white text-[#667eea] w-16 h-16 rounded-full flex items-center justify-center text-2xl shadow-lg active:bg-white/90"
+          className="bg-white text-[#667eea] w-16 h-16 rounded-full flex items-center justify-center shadow-lg active:bg-white/90"
         >
-          {isPlaying ? "⏸" : "▶"}
+          {isPlaying ? <PauseIcon size={32} /> : <PlayIcon size={32} />}
         </button>
         <button
           onClick={() => seekBy(15)}
-          className="text-white/80 text-lg"
+          className="text-white/80 p-2"
         >
-          15⏩
+          <FastForwardIcon size={24} />
         </button>
         <button
           onClick={() => { const next = chapters.find((ch) => ch.idx === currentIdx + 1); if (next) onChapterChange(next); }}
           disabled={!hasNext}
-          className="text-white/80 text-2xl disabled:opacity-30"
+          className="text-white/80 disabled:opacity-30 p-2"
         >
-          ⏭
+          <SkipForwardIcon size={28} />
         </button>
       </div>
 
@@ -283,9 +296,9 @@ export default function AudiobookControls({
         <div className="relative">
           <button
             onClick={() => { setShowSleepMenu(!showSleepMenu); setShowRateMenu(false); }}
-            className="flex flex-col items-center"
+            className="flex flex-col items-center p-2"
           >
-            <span className="text-xl mb-1">⏰</span>
+            <TimerIcon size={24} className="text-white/80 mb-1" />
             <span className="text-xs text-white/70">
               {sleepTimerRemaining !== null ? formatRemaining(sleepTimerRemaining) : "定时"}
             </span>
@@ -310,9 +323,9 @@ export default function AudiobookControls({
         <div className="relative">
           <button
             onClick={() => { setShowRateMenu(!showRateMenu); setShowSleepMenu(false); }}
-            className="flex flex-col items-center"
+            className="flex flex-col items-center p-2"
           >
-            <span className="text-xl mb-1">🔊</span>
+            <SpeedIcon size={24} className="text-white/80 mb-1" />
             <span className="text-xs text-white/70 tabular-nums">{playbackRate}x</span>
           </button>
           {showRateMenu && (
@@ -335,20 +348,20 @@ export default function AudiobookControls({
         {hasVideo && (
           <button
             onClick={onToggleVideo}
-            className="flex flex-col items-center"
+            className="flex flex-col items-center p-2"
           >
-            <span className="text-xl mb-1">🎬</span>
+            <VideoIcon size={24} className="text-white/80 mb-1" />
             <span className="text-xs text-white/70">{showVideo ? "纯音频" : "显示画面"}</span>
           </button>
         )}
         
-        <button className="flex flex-col items-center">
-          <span className="text-xl mb-1">📋</span>
+        <button className="flex flex-col items-center p-2">
+          <ListIcon size={24} className="text-white/80 mb-1" />
           <span className="text-xs text-white/70">目录</span>
         </button>
         
-        <button className="flex flex-col items-center">
-          <span className="text-xl mb-1">❤️</span>
+        <button className="flex flex-col items-center p-2">
+          <HeartIcon size={24} className="text-white/80 mb-1" />
           <span className="text-xs text-white/70">收藏</span>
         </button>
       </div>
