@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
@@ -141,9 +141,11 @@ export default function AudiobookPlayer() {
     return <div className="pt-12 text-center text-[13px] text-[#c7c7cc]">缺少 book_key</div>;
   }
 
-  const gradientStyle = {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-  };
+  const gradientStyle = useMemo(() => {
+    return {
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+    };
+  }, []);
 
   return (
     <div className="min-h-screen" style={gradientStyle}>
@@ -154,7 +156,7 @@ export default function AudiobookPlayer() {
         <span className="text-[14px] font-medium text-[#1d1d1f] truncate flex-1">{bookName}</span>
       </div>
 
-      <div className="pt-14 pb-32">
+      <div className="pt-14 pb-32 px-4 max-w-md mx-auto">
         {currentMedia && (
           currentMedia.media_type === "video" ? (
             <video
