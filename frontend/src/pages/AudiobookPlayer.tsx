@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
+import { useAudiobookHistory } from "@/stores/audiobookHistory";
 
 export default function AudiobookPlayer() {
   const [params] = useSearchParams();
@@ -91,9 +92,50 @@ export default function AudiobookPlayer() {
     loadBook(bookKey);
   }, [bookKey, loadBook]);
 
+  const { addHistory, getHistory } = useAudiobookHistory();
+
   const hasVideo = manifest?.media_files.some((f) => f.media_type === "video") ?? false;
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
+
+  // 在加载书籍时恢复播放进度
+  useEffect(() => {
+    if (bookKey) {
+      const savedHistory = getHistory(bookKey);
+      if (savedHistory && chapters.length > 0) {
+        const savedChapter = chapters.find(ch => ch.idx === savedHistory.chapterIdx);
+        if (savedChapter) {
+          handleChapterChange(savedChapter);
+          // 恢复播放进度需要在媒体加载后设置
+        }
+      }
+    }
+  }, [bookKey, chapters, getHistory, handleChapterChange]);
+
+  // 在播放时保存进度
+  const saveProgress = useCallback(() => {
+    const media = mediaRef.current;
+    if (media && bookKey && chapter) {
+      addHistory({
+        bookKey,
+        bookName,
+        chapterIdx: currentIdx,
+        currentTime: media.currentTime,
+        lastPlayed: Date.now()
+      });
+    }
+  }, [bookKey, bookName, currentIdx, chapter, addHistory]);
+
+  // 定期保存进度
+  useEffect(() => {
+    const interval = setInterval(saveProgress, 30000);
+    return () => clearInterval(interval);
+  }, [saveProgress]);
+
+  // 在离开页面时保存进度
+  useEffect(() => {
+    return () => saveProgress();
+  }, [saveProgress]);
 
   if (!bookKey) {
     return <div className="pt-12 text-center text-[13px] text-[#c7c7cc]">缺少 book_key</div>;
