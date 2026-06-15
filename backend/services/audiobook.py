@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+from backend.services.douban_cover import search_douban_cover, download_cover, get_cover_extension
+
 logger = logging.getLogger(__name__)
 
 from backend.config import settings
@@ -206,6 +208,16 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
     # Derive book name from parent directory
     book_name = settings.audiobook_dir.name
 
+    # Try to fetch cover from Douban
+    cover_url = ""
+    try:
+        douban_cover = await search_douban_cover(book_name)
+        if douban_cover:
+            cover_url = douban_cover
+            logger.info("Found Douban cover for '%s': %s", book_name, cover_url)
+    except Exception as e:
+        logger.warning("Failed to fetch Douban cover for '%s': %s", book_name, e)
+
     db = await get_db()
     await db.execute(
         """INSERT INTO books
@@ -220,7 +232,7 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
             book_key,
             book_name,
             "",
-            "",
+            cover_url,
             "",
             book_url,
             source_url,
@@ -276,6 +288,16 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     source_url = AUDIobook_SOURCE_URL
     book_key = build_book_key(source_url, book_url)
 
+    # Try to fetch cover from Douban
+    cover_url = ""
+    try:
+        douban_cover = await search_douban_cover(dir_name)
+        if douban_cover:
+            cover_url = douban_cover
+            logger.info("Found Douban cover for '%s': %s", dir_name, cover_url)
+    except Exception as e:
+        logger.warning("Failed to fetch Douban cover for '%s': %s", dir_name, e)
+
     db = await get_db()
     await db.execute(
         """INSERT INTO books
@@ -290,7 +312,7 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
             book_key,
             dir_name,
             "",
-            "",
+            cover_url,
             "",
             book_url,
             source_url,
