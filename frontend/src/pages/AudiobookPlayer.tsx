@@ -13,18 +13,23 @@ export default function AudiobookPlayer() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [manifest, setManifest] = useState<AudiobookManifest | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [showVideo, setShowVideo] = useState(() => {
     return localStorage.getItem("audiobook-show-video") !== "false";
   });
   const mediaRef = useRef<HTMLVideoElement>(null);
+  const loadedBookRef = useRef<string>("");
 
   useEffect(() => {
     localStorage.setItem("audiobook-show-video", String(showVideo));
   }, [showVideo]);
 
   useEffect(() => {
-    if (!bookKey) return;
+    if (!bookKey || bookKey === loadedBookRef.current) return;
+    loadedBookRef.current = bookKey;
     setLoading(true);
+    setError("");
+    setManifest(null);
     api.getChapters({ bookKey })
       .then((list) => {
         setChapters(list);
@@ -32,21 +37,29 @@ export default function AudiobookPlayer() {
           loadChapter(list[0]);
         } else {
           setLoading(false);
+          setError("没有章节");
         }
       })
-      .catch(() => setLoading(false));
+      .catch((e: unknown) => {
+        setLoading(false);
+        setError(`加载章节失败: ${e instanceof Error ? e.message : "未知错误"}`);
+      });
   }, [bookKey]);
 
   const loadChapter = useCallback(async (chapter: Chapter) => {
     setLoading(true);
+    setError("");
     try {
       const res = await api.getChapterContent(chapter.url, "local://audiobook");
       if (res.type === "audiobook") {
         setManifest(res.manifest);
         setCurrentIdx(chapter.idx);
+      } else {
+        setError(`内容类型异常: ${res.type}`);
       }
-    } catch {
+    } catch (e: unknown) {
       setManifest(null);
+      setError(`加载内容失败: ${e instanceof Error ? e.message : "未知错误"}`);
     } finally {
       setLoading(false);
     }
@@ -60,6 +73,24 @@ export default function AudiobookPlayer() {
     loadChapter(chapter);
   }, [loadChapter]);
 
+  const handleRetry = useCallback(() => {
+    if (chapters.length > 0) {
+      loadChapter(chapters[currentIdx] || chapters[0]);
+    } else if (bookKey) {
+      loadedBookRef.current = "";
+      setLoading(true);
+      setError("");
+      api.getChapters({ bookKey })
+        .then((list) => {
+          setChapters(list);
+          if (list.length > 0) loadChapter(list[0]);
+          else setError("没有章节");
+        })
+        .catch((e: unknown) => setError(`加载失败: ${e instanceof Error ? e.message : "未知错误"}`))
+        .finally(() => setLoading(false));
+    }
+  }, [chapters, currentIdx, bookKey, loadChapter]);
+
   const hasVideo = manifest?.media_files.some((f) => f.media_type === "video") ?? false;
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
@@ -70,7 +101,6 @@ export default function AudiobookPlayer() {
 
   return (
     <div className="min-h-screen bg-[#fafafa]">
-      {/* Top bar */}
       <div className="fixed top-0 inset-x-0 z-50 flex items-center px-4 py-3 bg-white/90 backdrop-blur-xl border-b border-black/[0.06]">
         <button onClick={() => navigate(-1)} className="text-[13px] text-[#86868b] mr-4">
           ← 返回
@@ -78,9 +108,7 @@ export default function AudiobookPlayer() {
         <span className="text-[14px] font-medium text-[#1d1d1f] truncate flex-1">{bookName}</span>
       </div>
 
-      {/* Content */}
       <div className="pt-14 pb-32">
-        {/* Video / Cover area */}
         <div className={`mx-auto ${showVideo && hasVideo ? "aspect-video" : "aspect-square max-w-[300px]"} bg-black/5 flex items-center justify-center`}>
           {loading ? (
             <p className="text-[13px] text-[#c7c7cc]">加载中...</p>
@@ -113,7 +141,6 @@ export default function AudiobookPlayer() {
           )}
         </div>
 
-        {/* Chapter info */}
         <div className="px-4 mt-4 text-center">
           <h2 className="text-[16px] font-medium text-[#1d1d1f]">
             {chapter?.title || "加载中..."}
@@ -123,7 +150,18 @@ export default function AudiobookPlayer() {
           </p>
         </div>
 
-        {/* Controls */}
+        {error && (
+          <div className="mx-4 mt-4 p-3 rounded-lg bg-red-50 border border-red-200">
+            <p className="text-[13px] text-red-600">{error}</p>
+            <button
+              onClick={handleRetry}
+              className="mt-2 px-4 py-1.5 rounded-lg bg-red-100 text-[13px] text-red-700 active:bg-red-200"
+            >
+              重试
+            </button>
+          </div>
+        )}
+
         {manifest && (
           <div className="mt-6">
             <AudiobookControls
