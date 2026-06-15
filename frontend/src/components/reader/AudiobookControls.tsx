@@ -54,7 +54,6 @@ export default function AudiobookControls({
   });
   const [showRateMenu, setShowRateMenu] = useState(false);
   const [showSleepMenu, setShowSleepMenu] = useState(false);
-  const [showToc, setShowToc] = useState(false);
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
   const sleepTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -275,14 +274,7 @@ export default function AudiobookControls({
       </div>
 
       {/* Bottom bar */}
-      <div className="flex items-center justify-between px-4 py-2 text-[12px] text-[#86868b]">
-        <button
-          onClick={() => setShowToc(true)}
-          className="px-3 py-1.5 rounded-lg active:bg-black/5"
-        >
-          📋 目录
-        </button>
-
+      <div className="flex items-center justify-end px-4 py-2 text-[12px] text-[#86868b] gap-2">
         <div className="relative">
           <button
             onClick={() => { setShowSleepMenu(!showSleepMenu); setShowRateMenu(false); }}
@@ -341,35 +333,27 @@ export default function AudiobookControls({
         </div>
       </div>
 
-      {/* TOC drawer */}
-      {showToc && (
-        <div className="fixed inset-0 z-50 flex" onClick={() => setShowToc(false)}>
-          <div
-            className="w-72 max-w-[80vw] h-full bg-white shadow-2xl overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 px-5 py-4 border-b border-black/[0.06] bg-white z-10">
-              <h3 className="text-[12px] font-semibold uppercase tracking-wider text-[#86868b]">
-                目录 · {chapters.length} 章
-              </h3>
-            </div>
-            <div className="py-1">
-              {chapters.map((ch) => (
-                <button
-                  key={ch.idx}
-                  onClick={() => { onChapterChange(ch); setShowToc(false); }}
-                  className={`block w-full text-left px-5 py-2.5 text-[13px] truncate transition-colors ${
-                    ch.idx === currentIdx
-                      ? "text-[#c45d35] font-medium bg-[#c45d35]/[0.04]"
-                      : "text-[#1d1d1f] hover:bg-black/[0.03]"
-                  }`}
-                >
-                  {ch.title}
-                </button>
-              ))}
-            </div>
+      {/* Inline chapter list */}
+      {chapters.length > 0 && (
+        <div className="mt-4 border-t border-black/[0.06] pt-3">
+          <h4 className="text-[12px] font-semibold uppercase tracking-wider text-[#86868b] mb-2 px-1">
+            目录 · {chapters.length} 章
+          </h4>
+          <div className="max-h-[300px] overflow-y-auto">
+            {chapters.map((ch) => (
+              <button
+                key={ch.idx}
+                onClick={() => onChapterChange(ch)}
+                className={`block w-full text-left px-3 py-2 text-[13px] truncate rounded transition-colors ${
+                  ch.idx === currentIdx
+                    ? "text-[#c45d35] font-medium bg-[#c45d35]/[0.04]"
+                    : "text-[#1d1d1f] hover:bg-black/[0.03]"
+                }`}
+              >
+                {ch.title}
+              </button>
+            ))}
           </div>
-          <div className="flex-1 bg-black/30" />
         </div>
       )}
     </div>

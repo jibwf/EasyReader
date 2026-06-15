@@ -165,7 +165,7 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
         return None
 
     media_files = [
-        f for f in audiobook_dir.iterdir()
+        f for f in audiobook_dir.rglob("*")
         if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS
     ]
     if not media_files:
@@ -207,6 +207,8 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
     for idx, media_file in enumerate(media_files):
+        # Compute relative path from audiobook folder for URL
+        rel_path = media_file.relative_to(audiobook_dir)
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
         media_type = _media_type_from_ext(media_file.suffix)
@@ -219,7 +221,7 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
         manifest = json.dumps({
             "media_files": [{
                 "filename": media_file.name,
-                "url": _encode_media_url(dir_name, media_file.name),
+                "url": _encode_media_url(dir_name, str(rel_path)),
                 "media_type": media_type,
             }]
         })
