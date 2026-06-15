@@ -61,7 +61,7 @@ async def enforce_api_auth(request: Request, call_next):
         return await call_next(request)
 
     public_paths = ["/api/version", "/api/auth/login", "/api/auth/verify"]
-    if request.url.path in public_paths:
+    if request.url.path in public_paths or request.url.path.startswith("/api/media"):
         return await call_next(request)
 
     from backend.config import settings
