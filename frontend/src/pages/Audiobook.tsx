@@ -9,6 +9,8 @@ export default function Audiobook() {
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState("");
   const [scanLogs, setScanLogs] = useState<string[]>([]);
+  const [coverModal, setCoverModal] = useState<{ book: AudiobookItem; url: string } | null>(null);
+  const [settingCover, setSettingCover] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -90,6 +92,21 @@ export default function Audiobook() {
     );
   };
 
+  const handleSetCover = async () => {
+    if (!coverModal || !coverModal.url.trim()) return;
+    setSettingCover(true);
+    try {
+      await api.setAudiobookCover(coverModal.book.id, coverModal.url.trim());
+      setStatus(`《${coverModal.book.name}》封面已更新`);
+      setCoverModal(null);
+      await loadBooks();
+    } catch {
+      setStatus("封面设置失败，请检查链接是否正确");
+    } finally {
+      setSettingCover(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -154,17 +171,56 @@ export default function Audiobook() {
             >
               <div className="aspect-square rounded-xl bg-gradient-to-br from-[#c45d35]/10 to-[#c45d35]/5 flex items-center justify-center text-[48px] mb-2 relative overflow-hidden">
                 <span>🎧</span>
-                <button
-                  onClick={(e) => handleDelete(book, e)}
-                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 text-white text-[12px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                >
-                  ×
-                </button>
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCoverModal({ book, url: "" }); }}
+                    className="w-6 h-6 rounded-full bg-blue-500/80 text-white text-[12px] flex items-center justify-center"
+                    title="设置封面"
+                  >
+                    🖼
+                  </button>
+                  <button
+                    onClick={(e) => handleDelete(book, e)}
+                    className="w-6 h-6 rounded-full bg-black/50 text-white text-[12px] flex items-center justify-center"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
               <h3 className="text-[13px] font-medium text-[#1d1d1f] truncate">{book.name}</h3>
               <p className="text-[11px] text-[#86868b]">{book.total_chapters} 章</p>
             </div>
           ))}
+        </div>
+      )}
+      {coverModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setCoverModal(null)}>
+          <div className="bg-white rounded-xl p-5 w-[90%] max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-[15px] font-medium text-[#1d1d1f] mb-1">设置封面</h3>
+            <p className="text-[12px] text-[#86868b] mb-3">《{coverModal.book.name}》</p>
+            <input
+              type="url"
+              placeholder="粘贴豆瓣链接，如 https://book.douban.com/subject/27598664"
+              value={coverModal.url}
+              onChange={(e) => setCoverModal({ ...coverModal, url: e.target.value })}
+              className="w-full px-3 py-2 text-[13px] border border-black/10 rounded-lg mb-3 outline-none focus:border-[#c45d35]"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setCoverModal(null)}
+                className="px-3 py-1.5 text-[13px] text-[#86868b] hover:bg-black/5 rounded-lg"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSetCover}
+                disabled={settingCover || !coverModal.url.trim()}
+                className="px-3 py-1.5 text-[13px] font-medium text-white bg-[#c45d35] rounded-lg hover:bg-[#b05230] disabled:opacity-50"
+              >
+                {settingCover ? "获取中..." : "确认"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

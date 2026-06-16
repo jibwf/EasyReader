@@ -619,6 +619,12 @@ export const api = {
       method: "POST",
     }),
 
+  setAudiobookCover: (bookId: number, doubanUrl: string) =>
+    request<{ cover_url: string }>("/audiobook/set-cover", {
+      method: "POST",
+      body: JSON.stringify({ book_id: bookId, douban_url: doubanUrl }),
+    }),
+
   getAudiobookList: () => request<AudiobookItem[]>("/audiobook/list"),
 
   importAudiobookZip: async (file: File) => {
