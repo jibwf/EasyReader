@@ -296,24 +296,23 @@ async def _fetch_cover_for_audiobook(book_name: str) -> str | None:
     return None
 
 
-async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
-    """Import root-level media files as a single audiobook."""
-    media_files.sort(key=lambda f: _natural_sort_key(f.name))
-
-    book_url = f"{AUDIobook_SOURCE_URL}/__root__"
-    source_url = AUDIobook_SOURCE_URL
+async def _save_audiobook_to_db(
+    book_name: str,
+    book_url: str,
+    source_url: str,
+    media_files: list[Path],
+    media_root: str,
+    dir_name: str,
+) -> int:
+    """Common logic to save audiobook to database. Returns book_id."""
     book_key = build_book_key(source_url, book_url)
-
-    # Derive book name from parent directory
-    book_name = settings.audiobook_dir.name
-
+    
     # Try to fetch cover from Douban
     cover_url = ""
     try:
         douban_cover = await search_douban_cover(book_name)
         if douban_cover:
             cover_url = douban_cover
-            logger.info("Found Douban cover for '%s': %s", book_name, cover_url)
     except Exception as e:
         logger.warning("Failed to fetch Douban cover for '%s': %s", book_name, e)
 
@@ -327,27 +326,20 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
             total_chapters = excluded.total_chapters,
             media_root = excluded.media_root,
             updated_at = excluded.updated_at""",
-        (
-            book_key,
-            book_name,
-            "",
-            cover_url,
-            "",
-            book_url,
-            source_url,
-            "有声书",
-            len(media_files),
-            "__root__",
-        ),
+        (book_key, book_name, "", cover_url, "", book_url, source_url,
+         "有声书", len(media_files), media_root),
     )
 
     book_id = await _get_book_id(db, book_url, source_url)
 
+    # Clear existing chapters
     await db.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
     await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
 
+    # Add chapters
+    audiobook_dir = settings.audiobook_dir / dir_name if media_root != "__root__" else settings.audiobook_dir
     for idx, media_file in enumerate(media_files):
-        manifest_entry = _process_media_file(media_file, "__root__", settings.audiobook_dir)
+        manifest_entry = _process_media_file(media_file, media_root, audiobook_dir)
         chapter_title = media_file.stem
         chapter_url = f"{book_url}#{idx}"
 
@@ -365,6 +357,20 @@ async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
         )
 
     await db.commit()
+    return book_id
+
+
+async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
+    """Import root-level media files as a single audiobook."""
+    media_files.sort(key=lambda f: _natural_sort_key(f.name))
+    
+    book_url = f"{AUDIobook_SOURCE_URL}/__root__"
+    book_name = settings.audiobook_dir.name
+    
+    book_id = await _save_audiobook_to_db(
+        book_name, book_url, AUDIobook_SOURCE_URL,
+        media_files, "__root__", "__root__"
+    )
     return {"book_id": book_id, "name": book_name, "chapters": len(media_files)}
 
 
@@ -384,67 +390,11 @@ async def import_audiobook_from_dir(dir_name: str) -> dict | None:
     media_files.sort(key=lambda f: _natural_sort_key(f.name))
 
     book_url = f"{AUDIobook_SOURCE_URL}/{dir_name}"
-    source_url = AUDIobook_SOURCE_URL
-    book_key = build_book_key(source_url, book_url)
-
-    # Try to fetch cover from Douban
-    cover_url = ""
-    try:
-        douban_cover = await search_douban_cover(dir_name)
-        if douban_cover:
-            cover_url = douban_cover
-            logger.info("Found Douban cover for '%s': %s", dir_name, cover_url)
-    except Exception as e:
-        logger.warning("Failed to fetch Douban cover for '%s': %s", dir_name, e)
-
-    db = await get_db()
-    await db.execute(
-        """INSERT INTO books
-        (book_key, name, author, cover_url, intro, book_url, source_url,
-         category_name, total_chapters, media_root, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(book_key) DO UPDATE SET
-            total_chapters = excluded.total_chapters,
-            media_root = excluded.media_root,
-            updated_at = excluded.updated_at""",
-        (
-            book_key,
-            dir_name,
-            "",
-            cover_url,
-            "",
-            book_url,
-            source_url,
-            "有声书",
-            len(media_files),
-            dir_name,
-        ),
+    
+    book_id = await _save_audiobook_to_db(
+        dir_name, book_url, AUDIobook_SOURCE_URL,
+        media_files, dir_name, dir_name
     )
-
-    book_id = await _get_book_id(db, book_url, source_url)
-
-    await db.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
-    await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
-
-    for idx, media_file in enumerate(media_files):
-        manifest_entry = _process_media_file(media_file, dir_name, audiobook_dir)
-        chapter_title = media_file.stem
-        chapter_url = f"{book_url}#{idx}"
-
-        await db.execute(
-            "INSERT INTO chapters (book_id, title, url, idx, cached) VALUES (?, ?, ?, ?, 1)",
-            (book_id, chapter_title, chapter_url, idx),
-        )
-
-        manifest = json.dumps({"media_files": [manifest_entry]})
-        await db.execute(
-            """INSERT INTO chapter_cache
-            (book_id, chapter_idx, chapter_title, chapter_url, content, content_type)
-            VALUES (?, ?, ?, ?, ?, 'audiobook')""",
-            (book_id, idx, chapter_title, chapter_url, manifest),
-        )
-
-    await db.commit()
     return {"book_id": book_id, "name": dir_name, "chapters": len(media_files)}
 
 
@@ -532,7 +482,11 @@ async def delete_audiobook(book_id: int, delete_files: bool = False) -> dict:
     book_name = row["name"]
     media_root = row["media_root"]
     
-    # Delete from database
+    # Delete related data first (chapters and chapter_cache)
+    await db.execute("DELETE FROM chapters WHERE book_id = ?", (book_id,))
+    await db.execute("DELETE FROM chapter_cache WHERE book_id = ?", (book_id,))
+    
+    # Delete from books table
     await db.execute(
         "DELETE FROM books WHERE id = ? AND source_url = ?",
         (book_id, AUDIobook_SOURCE_URL),

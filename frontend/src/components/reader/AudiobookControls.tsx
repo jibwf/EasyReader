@@ -47,6 +47,7 @@ interface AudiobookControlsProps {
   showVideo: boolean;
   onToggleVideo: () => void;
   hasVideo: boolean;
+  onSaveProgress?: () => void;
 }
 
 export default function AudiobookControls({
@@ -57,6 +58,7 @@ export default function AudiobookControls({
   showVideo,
   onToggleVideo,
   hasVideo,
+  onSaveProgress,
 }: AudiobookControlsProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -165,13 +167,14 @@ export default function AudiobookControls({
       setSleepTimerRemaining((prev) => {
         if (prev === null || prev <= 1) {
           if (sleepTimerRef.current) clearInterval(sleepTimerRef.current);
+          onSaveProgress?.();
           mediaRef.current?.pause();
           return null;
         }
         return prev - 1;
       });
     }, 1000);
-  }, [mediaRef]);
+  }, [mediaRef, onSaveProgress]);
 
   useEffect(() => {
     return () => { if (sleepTimerRef.current) clearInterval(sleepTimerRef.current); };
@@ -227,6 +230,33 @@ export default function AudiobookControls({
     window.addEventListener("mouseup", onUp);
   };
 
+  const handleProgressTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    setDragging(true);
+    const touch = e.touches[0];
+    const bar = progressRef.current;
+    const media = mediaRef.current;
+    if (!bar || !media || !duration) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+    setCurrentTime(ratio * duration);
+    
+    const onMove = (ev: TouchEvent) => {
+      const t = ev.touches[0];
+      const r = Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width));
+      setCurrentTime(r * duration);
+    };
+    const onEnd = (ev: TouchEvent) => {
+      setDragging(false);
+      const t = ev.changedTouches[0];
+      const r = Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width));
+      media.currentTime = r * duration;
+      bar.removeEventListener("touchmove", onMove);
+      bar.removeEventListener("touchend", onEnd);
+    };
+    bar.addEventListener("touchmove", onMove, { passive: true });
+    bar.addEventListener("touchend", onEnd);
+  };
+
   const hasPrev = chapters.some((ch) => ch.idx === currentIdx - 1);
   const hasNext = chapters.some((ch) => ch.idx === currentIdx + 1);
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -239,6 +269,7 @@ export default function AudiobookControls({
           ref={progressRef}
           className="relative h-1 bg-white/30 rounded-full cursor-pointer group"
           onMouseDown={handleProgressMouseDown}
+          onTouchStart={handleProgressTouchStart}
         >
           <div
             className="absolute inset-y-0 left-0 bg-white rounded-full"

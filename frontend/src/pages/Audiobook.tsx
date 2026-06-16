@@ -104,9 +104,14 @@ export default function Audiobook() {
   };
 
   const handleBookClick = (book: AudiobookItem) => {
-    navigate(
-      `/audiobook/play?book_key=${encodeURIComponent(book.book_key)}&book_name=${encodeURIComponent(book.name)}`
-    );
+    const params = new URLSearchParams({
+      book_key: book.book_key,
+      book_name: book.name,
+    });
+    if (book.cover_url) {
+      params.set("cover_url", book.cover_url);
+    }
+    navigate(`/audiobook/play?${params.toString()}`);
   };
 
   const handleSetCover = async () => {

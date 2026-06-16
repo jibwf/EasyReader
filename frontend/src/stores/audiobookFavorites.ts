@@ -9,35 +9,36 @@ interface AudiobookFavorite {
 
 interface AudiobookFavoritesStore {
   favorites: AudiobookFavorite[];
-  addFavorite: (favorite: AudiobookFavorite) => void;
+  addFavorite: (bookKey: string, bookName: string) => void;
   removeFavorite: (bookKey: string) => void;
   isFavorite: (bookKey: string) => boolean;
-  getFavorites: () => AudiobookFavorite[];
 }
 
 export const useAudiobookFavorites = create<AudiobookFavoritesStore>()(
   persist(
     (set, get) => ({
       favorites: [],
-      addFavorite: (newFavorite) => {
+      
+      addFavorite: (bookKey, bookName) => {
         set((state) => {
-          if (state.favorites.some(f => f.bookKey === newFavorite.bookKey)) {
+          if (state.favorites.some(f => f.bookKey === bookKey)) {
             return state;
           }
-          return { favorites: [...state.favorites, newFavorite] };
+          return {
+            favorites: [...state.favorites, { bookKey, bookName, addedAt: Date.now() }]
+          };
         });
       },
+      
       removeFavorite: (bookKey) => {
         set((state) => ({
           favorites: state.favorites.filter(f => f.bookKey !== bookKey)
         }));
       },
+      
       isFavorite: (bookKey) => {
         return get().favorites.some(f => f.bookKey === bookKey);
       },
-      getFavorites: () => {
-        return get().favorites;
-      }
     }),
     { name: 'audiobook-favorites' }
   )

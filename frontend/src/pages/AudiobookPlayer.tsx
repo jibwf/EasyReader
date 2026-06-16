@@ -4,12 +4,14 @@ import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
 import { useAudiobookHistory } from "@/stores/audiobookHistory";
 import { useAudiobookOffline } from "@/stores/audiobookOffline";
-import { HeadphonesIcon, DownloadIcon, CheckCircleIcon, XCircleIcon } from "@/components/icons";
+import { useAudiobookFavorites } from "@/stores/audiobookFavorites";
+import { HeadphonesIcon, DownloadIcon, CheckCircleIcon, XCircleIcon, HeartIcon } from "@/components/icons";
 
 export default function AudiobookPlayer() {
   const [params] = useSearchParams();
   const bookKey = params.get("book_key") || "";
   const bookName = params.get("book_name") || "";
+  const coverUrl = params.get("cover_url") || "";
   const navigate = useNavigate();
 
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -103,8 +105,19 @@ export default function AudiobookPlayer() {
     downloadProgress,
     getBookCachedChapters
   } = useAudiobookOffline();
+  const { addFavorite, removeFavorite, isFavorite } = useAudiobookFavorites();
 
   const hasVideo = manifest?.media_files.some((f) => f.media_type === "video") ?? false;
+  const isFavorited = bookKey ? isFavorite(bookKey) : false;
+
+  const toggleFavorite = useCallback(() => {
+    if (!bookKey) return;
+    if (isFavorited) {
+      removeFavorite(bookKey);
+    } else {
+      addFavorite(bookKey, bookName);
+    }
+  }, [bookKey, bookName, isFavorited, addFavorite, removeFavorite]);
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
 
@@ -203,6 +216,13 @@ export default function AudiobookPlayer() {
         
         {/* 离线状态和下载按钮 */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={toggleFavorite}
+            className={`p-1.5 rounded-lg ${isFavorited ? 'text-red-500' : 'text-[#86868b] hover:text-[#1d1d1f]'}`}
+          >
+            <HeartIcon size={18} filled={isFavorited} />
+          </button>
+          
           {isCurrentChapterCached && (
             <span className="text-[12px] text-green-600 flex items-center gap-1">
               <CheckCircleIcon size={14} />
@@ -253,9 +273,11 @@ export default function AudiobookPlayer() {
 
         {!showVideo && (
           <div className="flex flex-col items-center justify-center py-8 sm:py-12 md:py-16">
-            <div className="w-48 h-48 sm:w-56 sm:h-56 md:w-64 md:h-64 lg:w-72 lg:h-72 bg-white/20 rounded-2xl backdrop-blur-sm border border-white/30 flex items-center justify-center mb-6">
+            <div className="w-48 h-48 sm:w-56 sm:h-56 md:w-64 md:h-64 lg:w-72 lg:h-72 bg-white/20 rounded-2xl backdrop-blur-sm border border-white/30 flex items-center justify-center mb-6 overflow-hidden">
               {loading ? (
                 <p className="text-[13px] text-white/80">加载中...</p>
+              ) : coverUrl ? (
+                <img src={coverUrl} alt={bookName} className="w-full h-full object-cover" />
               ) : (
                 <HeadphonesIcon size={64} className="text-white/60" />
               )}
@@ -339,6 +361,7 @@ export default function AudiobookPlayer() {
               showVideo={showVideo}
               onToggleVideo={() => setShowVideo((v) => !v)}
               hasVideo={hasVideo}
+              onSaveProgress={saveProgress}
             />
           </div>
         )}

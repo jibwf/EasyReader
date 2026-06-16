@@ -1,5 +1,7 @@
 """Media router — serve audiobook media files with Range request support."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
@@ -27,13 +29,23 @@ IMAGE_TYPES = {
 }
 
 
+def _is_safe_path(file_path: Path, base_dir: Path) -> bool:
+    """Check if resolved path is within base directory to prevent path traversal."""
+    try:
+        resolved = file_path.resolve()
+        return resolved.is_relative_to(base_dir.resolve())
+    except (ValueError, OSError):
+        return False
+
+
 @router.get("/covers/{filename:path}")
 async def serve_cover(filename: str):
     """Serve audiobook cover images."""
-    if ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid path")
-
     file_path = settings.audiobook_cover_dir / filename
+    
+    if not _is_safe_path(file_path, settings.audiobook_cover_dir):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Cover not found")
 
@@ -43,10 +55,11 @@ async def serve_cover(filename: str):
 
 @router.get("/{folder_name}/{filename:path}")
 async def serve_media(folder_name: str, filename: str):
-    if ".." in folder_name or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid path")
-
     file_path = settings.audiobook_dir / folder_name / filename
+    
+    if not _is_safe_path(file_path, settings.audiobook_dir):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
