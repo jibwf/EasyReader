@@ -149,14 +149,17 @@ async def scan_audiobooks() -> dict:
     Supports two layouts:
     1. Each subfolder is one book: data/audiobooks/书名/001.mp3
     2. Root-level media files form one book: data/audiobooks/001.mp3
+    
+    Also checks existing audiobooks for missing covers and fetches from Douban.
     """
     audiobook_dir = settings.audiobook_dir
     if not audiobook_dir.exists():
         audiobook_dir.mkdir(parents=True, exist_ok=True)
-        return {"scanned": 0, "imported": 0, "skipped": 0}
+        return {"scanned": 0, "imported": 0, "skipped": 0, "covers_fetched": 0}
 
     imported = 0
     skipped = 0
+    covers_fetched = 0
 
     db = await get_db()
 
@@ -165,10 +168,20 @@ async def scan_audiobooks() -> dict:
     for entry in sorted(subfolders, key=lambda e: _natural_sort_key(e.name)):
         folder_name = entry.name
         cursor = await db.execute(
-            "SELECT id FROM books WHERE media_root = ? AND source_url = ?",
+            "SELECT id, cover_url FROM books WHERE media_root = ? AND source_url = ?",
             (folder_name, AUDIobook_SOURCE_URL),
         )
-        if await cursor.fetchone():
+        row = await cursor.fetchone()
+        if row:
+            # Check if cover is missing
+            if not row["cover_url"]:
+                cover_url = await _fetch_cover_for_audiobook(folder_name)
+                if cover_url:
+                    await db.execute(
+                        "UPDATE books SET cover_url = ? WHERE id = ?",
+                        (cover_url, row["id"]),
+                    )
+                    covers_fetched += 1
             skipped += 1
             continue
 
@@ -184,17 +197,53 @@ async def scan_audiobooks() -> dict:
     if root_media:
         root_marker = "__root__"
         cursor = await db.execute(
-            "SELECT id FROM books WHERE media_root = ? AND source_url = ?",
+            "SELECT id, cover_url FROM books WHERE media_root = ? AND source_url = ?",
             (root_marker, AUDIobook_SOURCE_URL),
         )
-        if not await cursor.fetchone():
+        row = await cursor.fetchone()
+        if row:
+            # Check if cover is missing
+            if not row["cover_url"]:
+                book_name = audiobook_dir.name
+                cover_url = await _fetch_cover_for_audiobook(book_name)
+                if cover_url:
+                    await db.execute(
+                        "UPDATE books SET cover_url = ? WHERE id = ?",
+                        (cover_url, row["id"]),
+                    )
+                    covers_fetched += 1
+            skipped += 1
+        else:
             result = await _import_root_level_audiobook(root_media)
             if result:
                 imported += 1
-        else:
-            skipped += 1
 
-    return {"scanned": len(subfolders) + (1 if root_media else 0), "imported": imported, "skipped": skipped}
+    await db.commit()
+    return {
+        "scanned": len(subfolders) + (1 if root_media else 0),
+        "imported": imported,
+        "skipped": skipped,
+        "covers_fetched": covers_fetched,
+    }
+
+
+async def _fetch_cover_for_audiobook(book_name: str) -> str | None:
+    """Fetch cover from Douban for an audiobook.
+    
+    Args:
+        book_name: Name of the audiobook
+        
+    Returns:
+        Cover URL or None if not found
+    """
+    try:
+        cover_url = await search_douban_cover(book_name)
+        if cover_url:
+            logger.info("Fetched cover for '%s': %s", book_name, cover_url)
+            return cover_url
+    except Exception as e:
+        logger.warning("Failed to fetch cover for '%s': %s", book_name, e)
+    return None
 
 
 async def _import_root_level_audiobook(media_files: list[Path]) -> dict | None:
