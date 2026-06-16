@@ -203,7 +203,11 @@ export default function Audiobook() {
               className="group cursor-pointer"
             >
               <div className="aspect-square rounded-xl bg-gradient-to-br from-[#c45d35]/10 to-[#c45d35]/5 flex items-center justify-center text-[48px] mb-2 relative overflow-hidden">
-                <span>🎧</span>
+                {book.cover_url ? (
+                  <img src={book.cover_url} alt={book.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span>🎧</span>
+                )}
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => { e.stopPropagation(); setCoverModal({ book, url: "" }); }}
