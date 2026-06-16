@@ -2,6 +2,12 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type AudiobookItem } from "@/api/client";
 
+interface OrphanedBook {
+  id: number;
+  name: string;
+  media_root: string;
+}
+
 export default function Audiobook() {
   const [books, setBooks] = useState<AudiobookItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -12,6 +18,7 @@ export default function Audiobook() {
   const [coverModal, setCoverModal] = useState<{ book: AudiobookItem; url: string } | null>(null);
   const [settingCover, setSettingCover] = useState(false);
   const [deleteModal, setDeleteModal] = useState<AudiobookItem | null>(null);
+  const [orphanedBooks, setOrphanedBooks] = useState<OrphanedBook[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -36,7 +43,12 @@ export default function Audiobook() {
     try {
       const result = await api.scanAudiobooks();
       setScanLogs(result.logs || []);
-      if (result.imported > 0) {
+      
+      // Check for orphaned books
+      if (result.orphaned && result.orphaned.length > 0) {
+        setOrphanedBooks(result.orphaned);
+        setStatus(`扫描完成：发现 ${result.orphaned.length} 个文件已删除的有声书`);
+      } else if (result.imported > 0) {
         setStatus(`扫描完成：导入 ${result.imported} 本`);
       } else if (result.covers_fetched > 0) {
         setStatus(`扫描完成：更新 ${result.covers_fetched} 个封面`);
@@ -109,6 +121,22 @@ export default function Audiobook() {
       setStatus("封面设置失败，请检查链接是否正确");
     } finally {
       setSettingCover(false);
+    }
+  };
+
+  const handleOrphanedAction = async (action: "delete" | "keep") => {
+    const ids = orphanedBooks.map(b => b.id);
+    try {
+      await api.handleOrphanedAudiobooks(ids, action);
+      if (action === "delete") {
+        setStatus(`已删除 ${ids.length} 个孤立记录`);
+      } else {
+        setStatus(`已保留 ${ids.length} 个记录（文件移动后可重新扫描）`);
+      }
+      setOrphanedBooks([]);
+      await loadBooks();
+    } catch {
+      setStatus("操作失败");
     }
   };
 
@@ -256,6 +284,38 @@ export default function Audiobook() {
             >
               取消
             </button>
+          </div>
+        </div>
+      )}
+
+      {orphanedBooks.length > 0 && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-5 w-[90%] max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-[15px] font-medium text-[#1d1d1f] mb-2">发现已删除的有声书</h3>
+            <p className="text-[12px] text-[#86868b] mb-3">
+              以下 {orphanedBooks.length} 本有声书的原始文件已不存在：
+            </p>
+            <div className="max-h-32 overflow-y-auto mb-4 text-[12px] text-[#1d1d1f]">
+              {orphanedBooks.map(b => (
+                <p key={b.id} className="py-1 border-b border-black/5">• {b.name}</p>
+              ))}
+            </div>
+            <div className="space-y-2 mb-4">
+              <button
+                onClick={() => handleOrphanedAction("keep")}
+                className="w-full px-3 py-2.5 text-[13px] text-left rounded-lg border border-black/10 hover:bg-black/5"
+              >
+                <span className="font-medium text-[#1d1d1f]">保留记录</span>
+                <span className="block text-[11px] text-[#86868b] mt-0.5">用于临时移动文件，下次扫描到可复用</span>
+              </button>
+              <button
+                onClick={() => handleOrphanedAction("delete")}
+                className="w-full px-3 py-2.5 text-[13px] text-left rounded-lg border border-red-200 hover:bg-red-50"
+              >
+                <span className="font-medium text-red-600">清除记录</span>
+                <span className="block text-[11px] text-[#86868b] mt-0.5">从书架彻底删除这些有声书信息</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

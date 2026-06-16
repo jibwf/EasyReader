@@ -151,27 +151,31 @@ async def scan_audiobooks() -> dict:
     2. Root-level media files form one book: data/audiobooks/001.mp3
     
     Also checks existing audiobooks for missing covers and fetches from Douban.
+    Detects orphaned records (files deleted but DB entry remains).
     """
     audiobook_dir = settings.audiobook_dir
     if not audiobook_dir.exists():
         audiobook_dir.mkdir(parents=True, exist_ok=True)
-        return {"scanned": 0, "imported": 0, "skipped": 0, "covers_fetched": 0, "logs": ["创建 audiobook 目录"]}
+        return {"scanned": 0, "imported": 0, "skipped": 0, "covers_fetched": 0, "logs": ["创建 audiobook 目录"], "orphaned": []}
 
     imported = 0
     skipped = 0
     covers_fetched = 0
     logs: list[str] = []
+    orphaned: list[dict] = []  # Books in DB but files missing
 
     db = await get_db()
 
-    # Scan subfolders as individual books
+    # Get all existing audiobook folder names on disk
     subfolders = [e for e in audiobook_dir.iterdir() if e.is_dir()]
+    folder_names = {e.name for e in subfolders}
     logs.append(f"扫描到 {len(subfolders)} 个文件夹")
 
+    # Scan subfolders as individual books
     for entry in sorted(subfolders, key=lambda e: _natural_sort_key(e.name)):
         folder_name = entry.name
         cursor = await db.execute(
-            "SELECT id, cover_url FROM books WHERE media_root = ? AND source_url = ?",
+            "SELECT id, name, cover_url FROM books WHERE media_root = ? AND source_url = ?",
             (folder_name, AUDIobook_SOURCE_URL),
         )
         row = await cursor.fetchone()
@@ -203,7 +207,7 @@ async def scan_audiobooks() -> dict:
         else:
             logs.append(f"《{folder_name}》导入失败：未找到媒体文件")
 
-    # Also check for root-level media files (treat as a single book)
+    # Check for root-level media files
     root_media = [
         f for f in audiobook_dir.iterdir()
         if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS
@@ -212,13 +216,12 @@ async def scan_audiobooks() -> dict:
         logs.append(f"发现 {len(root_media)} 个根目录媒体文件")
         root_marker = "__root__"
         cursor = await db.execute(
-            "SELECT id, cover_url FROM books WHERE media_root = ? AND source_url = ?",
+            "SELECT id, name, cover_url FROM books WHERE media_root = ? AND source_url = ?",
             (root_marker, AUDIobook_SOURCE_URL),
         )
         row = await cursor.fetchone()
         if row:
             logs.append("根目录有声书已存在")
-            # Check if cover is missing
             if not row["cover_url"]:
                 book_name = audiobook_dir.name
                 logs.append(f"搜索《{book_name}》封面...")
@@ -242,6 +245,27 @@ async def scan_audiobooks() -> dict:
             else:
                 logs.append("根目录有声书导入失败")
 
+    # Find orphaned records: books in DB but folder/file no longer exists
+    cursor = await db.execute(
+        "SELECT id, name, media_root FROM books WHERE source_url = ?",
+        (AUDIobook_SOURCE_URL,),
+    )
+    all_db_books = await cursor.fetchall()
+    
+    for book in all_db_books:
+        media_root = book["media_root"]
+        if media_root == "__root__":
+            # Check if root-level files still exist
+            if not root_media:
+                orphaned.append({"id": book["id"], "name": book["name"], "media_root": media_root})
+        else:
+            # Check if folder still exists
+            if media_root not in folder_names:
+                orphaned.append({"id": book["id"], "name": book["name"], "media_root": media_root})
+
+    if orphaned:
+        logs.append(f"发现 {len(orphaned)} 个孤立记录（文件已删除）")
+
     await db.commit()
     return {
         "scanned": len(subfolders) + (1 if root_media else 0),
@@ -249,6 +273,7 @@ async def scan_audiobooks() -> dict:
         "skipped": skipped,
         "covers_fetched": covers_fetched,
         "logs": logs,
+        "orphaned": orphaned,
     }
 
 

@@ -21,6 +21,11 @@ class SetCoverRequest(BaseModel):
     douban_url: str
 
 
+class HandleOrphanedRequest(BaseModel):
+    book_ids: list[int]
+    action: str  # "delete" or "keep"
+
+
 @router.post("/scan")
 async def scan():
     result = await scan_audiobooks()
@@ -81,3 +86,24 @@ async def set_cover(request: SetCoverRequest):
     await db.commit()
     
     return {"cover_url": cover_path}
+
+
+@router.post("/handle-orphaned")
+async def handle_orphaned(request: HandleOrphanedRequest):
+    """Handle orphaned audiobook records (files deleted but DB entry remains).
+    
+    action: "delete" to remove from DB, "keep" to retain for future use
+    """
+    db = await get_db()
+    
+    if request.action == "delete":
+        placeholders = ",".join("?" for _ in request.book_ids)
+        await db.execute(
+            f"DELETE FROM books WHERE id IN ({placeholders}) AND source_url = ?",
+            (*request.book_ids, AUDIobook_SOURCE_URL),
+        )
+        await db.commit()
+        return {"deleted": len(request.book_ids)}
+    
+    # "keep" - just return success, record stays in DB
+    return {"kept": len(request.book_ids)}

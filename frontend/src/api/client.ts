@@ -615,8 +615,14 @@ export const api = {
   },
 
   scanAudiobooks: () =>
-    request<{ scanned: number; imported: number; skipped: number; covers_fetched: number; logs: string[] }>("/audiobook/scan", {
+    request<{ scanned: number; imported: number; skipped: number; covers_fetched: number; logs: string[]; orphaned: { id: number; name: string; media_root: string }[] }>("/audiobook/scan", {
       method: "POST",
+    }),
+
+  handleOrphanedAudiobooks: (bookIds: number[], action: "delete" | "keep") =>
+    request<{ deleted?: number; kept?: number }>("/audiobook/handle-orphaned", {
+      method: "POST",
+      body: JSON.stringify({ book_ids: bookIds, action }),
     }),
 
   setAudiobookCover: (bookId: number, doubanUrl: string) =>
