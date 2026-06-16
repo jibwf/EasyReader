@@ -108,16 +108,32 @@ export default function AudiobookPlayer() {
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
 
-  // 边听边存：播放时自动缓存当前章节
+  // 边听边存：播放时自动缓存当前章节及后续5章
   useEffect(() => {
-    if (currentMedia && bookKey && chapter) {
-      const url = currentMedia.url;
-      // 异步缓存，不阻塞播放
-      downloadChapter(bookKey, chapter.idx, chapter.title, url).catch(() => {
+    if (!bookKey || chapters.length === 0) return;
+
+    // 缓存当前章节
+    if (currentMedia && chapter) {
+      downloadChapter(bookKey, chapter.idx, chapter.title, currentMedia.url).catch(() => {
         // 忽略错误，不影响播放
       });
     }
-  }, [currentMedia, bookKey, chapter, downloadChapter]);
+
+    // 预缓存后续5章
+    const prefetchCount = 5;
+    for (let i = 1; i <= prefetchCount; i++) {
+      const nextIdx = currentIdx + i;
+      if (nextIdx >= chapters.length) break;
+      
+      const nextChapter = chapters[nextIdx];
+      if (!isChapterCached(bookKey, nextChapter.idx)) {
+        // 异步预缓存，不阻塞
+        downloadChapter(bookKey, nextChapter.idx, nextChapter.title, nextChapter.url).catch(() => {
+          // 忽略错误
+        });
+      }
+    }
+  }, [currentIdx, currentMedia, bookKey, chapter, chapters, downloadChapter, isChapterCached]);
 
   // 检查当前章节是否已缓存
   const isCurrentChapterCached = chapter ? isChapterCached(bookKey, chapter.idx) : false;
