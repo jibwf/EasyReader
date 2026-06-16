@@ -8,6 +8,7 @@ export default function Audiobook() {
   const [scanning, setScanning] = useState(false);
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState("");
+  const [scanLogs, setScanLogs] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -28,14 +29,18 @@ export default function Audiobook() {
   const handleScan = async () => {
     setScanning(true);
     setStatus("扫描中...");
+    setScanLogs([]);
     try {
       const result = await api.scanAudiobooks();
+      setScanLogs(result.logs || []);
       if (result.imported > 0) {
-        setStatus(`导入 ${result.imported} 本有声书`);
+        setStatus(`扫描完成：导入 ${result.imported} 本`);
+      } else if (result.covers_fetched > 0) {
+        setStatus(`扫描完成：更新 ${result.covers_fetched} 个封面`);
       } else if (result.skipped > 0) {
-        setStatus("没有新的有声书");
+        setStatus("扫描完成：没有新的有声书");
       } else {
-        setStatus("未发现有声书文件夹");
+        setStatus("扫描完成：未发现有声书");
       }
       await loadBooks();
     } catch {
@@ -116,7 +121,17 @@ export default function Audiobook() {
       />
 
       {status && (
-        <p className="text-[12px] text-[#86868b] mb-4">{status}</p>
+        <p className="text-[12px] text-[#86868b] mb-2">{status}</p>
+      )}
+
+      {scanLogs.length > 0 && (
+        <div className="mb-4 p-3 rounded-lg bg-black/[0.02] border border-black/[0.04] max-h-48 overflow-y-auto">
+          {scanLogs.map((log, i) => (
+            <p key={i} className="text-[11px] text-[#86868b] leading-relaxed">
+              {log}
+            </p>
+          ))}
+        </div>
       )}
 
       {loading ? (

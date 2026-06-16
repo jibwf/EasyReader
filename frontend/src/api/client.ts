@@ -615,7 +615,7 @@ export const api = {
   },
 
   scanAudiobooks: () =>
-    request<{ scanned: number; imported: number; skipped: number }>("/audiobook/scan", {
+    request<{ scanned: number; imported: number; skipped: number; covers_fetched: number; logs: string[] }>("/audiobook/scan", {
       method: "POST",
     }),
 

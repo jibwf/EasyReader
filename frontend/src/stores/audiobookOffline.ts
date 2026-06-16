@@ -44,8 +44,8 @@ interface AudiobookOfflineStore {
   clearAllCache: () => void;
 }
 
-// Cache storage key
-const CACHE_STORAGE_KEY = 'audiobook-offline-cache';
+// Cache storage key — must match the Service Worker's cacheName in vite.config.ts
+const CACHE_STORAGE_KEY = 'audiobook-media';
 
 export const useAudiobookOffline = create<AudiobookOfflineStore>()(
   persist(

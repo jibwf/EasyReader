@@ -155,16 +155,19 @@ async def scan_audiobooks() -> dict:
     audiobook_dir = settings.audiobook_dir
     if not audiobook_dir.exists():
         audiobook_dir.mkdir(parents=True, exist_ok=True)
-        return {"scanned": 0, "imported": 0, "skipped": 0, "covers_fetched": 0}
+        return {"scanned": 0, "imported": 0, "skipped": 0, "covers_fetched": 0, "logs": ["创建 audiobook 目录"]}
 
     imported = 0
     skipped = 0
     covers_fetched = 0
+    logs: list[str] = []
 
     db = await get_db()
 
     # Scan subfolders as individual books
     subfolders = [e for e in audiobook_dir.iterdir() if e.is_dir()]
+    logs.append(f"扫描到 {len(subfolders)} 个文件夹")
+
     for entry in sorted(subfolders, key=lambda e: _natural_sort_key(e.name)):
         folder_name = entry.name
         cursor = await db.execute(
@@ -173,8 +176,10 @@ async def scan_audiobooks() -> dict:
         )
         row = await cursor.fetchone()
         if row:
+            logs.append(f"《{folder_name}》已存在")
             # Check if cover is missing
             if not row["cover_url"]:
+                logs.append(f"《{folder_name}》缺少封面，搜索豆瓣...")
                 cover_url = await _fetch_cover_for_audiobook(folder_name)
                 if cover_url:
                     await db.execute(
@@ -182,12 +187,21 @@ async def scan_audiobooks() -> dict:
                         (cover_url, row["id"]),
                     )
                     covers_fetched += 1
+                    logs.append(f"《{folder_name}》封面已保存")
+                else:
+                    logs.append(f"《{folder_name}》未找到封面")
+            else:
+                logs.append(f"《{folder_name}》封面已存在")
             skipped += 1
             continue
 
+        logs.append(f"导入《{folder_name}》...")
         result = await import_audiobook_from_dir(folder_name)
         if result:
             imported += 1
+            logs.append(f"《{folder_name}》导入成功（{result.get('chapters', 0)} 章）")
+        else:
+            logs.append(f"《{folder_name}》导入失败：未找到媒体文件")
 
     # Also check for root-level media files (treat as a single book)
     root_media = [
@@ -195,6 +209,7 @@ async def scan_audiobooks() -> dict:
         if f.is_file() and f.suffix.lower() in MEDIA_EXTENSIONS
     ]
     if root_media:
+        logs.append(f"发现 {len(root_media)} 个根目录媒体文件")
         root_marker = "__root__"
         cursor = await db.execute(
             "SELECT id, cover_url FROM books WHERE media_root = ? AND source_url = ?",
@@ -202,9 +217,11 @@ async def scan_audiobooks() -> dict:
         )
         row = await cursor.fetchone()
         if row:
+            logs.append("根目录有声书已存在")
             # Check if cover is missing
             if not row["cover_url"]:
                 book_name = audiobook_dir.name
+                logs.append(f"搜索《{book_name}》封面...")
                 cover_url = await _fetch_cover_for_audiobook(book_name)
                 if cover_url:
                     await db.execute(
@@ -212,11 +229,18 @@ async def scan_audiobooks() -> dict:
                         (cover_url, row["id"]),
                     )
                     covers_fetched += 1
+                    logs.append(f"《{book_name}》封面已保存")
+                else:
+                    logs.append(f"《{book_name}》未找到封面")
             skipped += 1
         else:
+            logs.append("导入根目录有声书...")
             result = await _import_root_level_audiobook(root_media)
             if result:
                 imported += 1
+                logs.append("根目录有声书导入成功")
+            else:
+                logs.append("根目录有声书导入失败")
 
     await db.commit()
     return {
@@ -224,6 +248,7 @@ async def scan_audiobooks() -> dict:
         "imported": imported,
         "skipped": skipped,
         "covers_fetched": covers_fetched,
+        "logs": logs,
     }
 
 
