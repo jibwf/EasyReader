@@ -355,8 +355,8 @@ async def import_books(file: UploadFile = File(...)):
 
 @router.post("/delete-batch")
 async def delete_batch(payload: BatchBookIdsSchema):
-    deleted = await delete_books_batch(payload.ids)
-    return {"deleted": deleted, "requested": len(payload.ids)}
+    result = await delete_books_batch(payload.ids)
+    return {**result, "requested": len(payload.ids)}
 
 
 @router.post("/cache-batch")

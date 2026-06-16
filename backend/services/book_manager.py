@@ -385,14 +385,51 @@ async def import_local_epub(file_name: str, raw_content: bytes) -> dict:
     return {"book_id": book_id, "name": title, "chapters": len(chapters)}
 
 
-async def delete_books_batch(ids: list[int]) -> int:
+async def delete_books_batch(ids: list[int]) -> dict:
+    """Delete books and their associated files.
+    
+    Returns:
+        Dict with deleted count and file cleanup info
+    """
     if not ids:
-        return 0
+        return {"deleted": 0, "files_deleted": 0}
+    
     db = await get_db()
+    
+    # Get book info before deletion
     placeholders = ",".join("?" for _ in ids)
+    cursor = await db.execute(
+        f"SELECT id, book_url, source_url FROM books WHERE id IN ({placeholders})",
+        ids,
+    )
+    books = await cursor.fetchall()
+    
+    # Delete files from disk
+    from backend.config import settings
+    import os
+    
+    files_deleted = 0
+    for book in books:
+        book_url = book["book_url"]
+        if book_url and book_url.startswith("local://"):
+            # Extract hash from URL like "local://txt/abc123"
+            parts = book_url.split("/")
+            if len(parts) >= 3:
+                file_hash = parts[-1]
+                # Delete from content cache
+                content_file = settings.content_cache_dir / file_hash
+                if content_file.exists():
+                    try:
+                        os.remove(content_file)
+                        files_deleted += 1
+                    except Exception:
+                        pass
+    
+    # Delete from database
     cursor = await db.execute(f"DELETE FROM books WHERE id IN ({placeholders})", ids)
     await db.commit()
-    return cursor.rowcount
+    
+    return {"deleted": cursor.rowcount, "files_deleted": files_deleted}
 
 
 async def ensure_book_cached(book_id: int) -> dict:

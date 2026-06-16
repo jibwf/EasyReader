@@ -642,10 +642,11 @@ export const api = {
     return res.json();
   },
 
-  deleteAudiobook: (bookId: number) =>
-    request<{ deleted: boolean }>(`/audiobook/${bookId}`, {
-      method: "DELETE",
-    }),
+  deleteAudiobook: (bookId: number, deleteFiles: boolean = false) =>
+    request<{ deleted: boolean; name: string; files_deleted: boolean }>(
+      `/audiobook/${bookId}?delete_files=${deleteFiles}`,
+      { method: "DELETE" }
+    ),
 };
 
 export type ChapterContent =

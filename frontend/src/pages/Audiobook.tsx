@@ -11,6 +11,7 @@ export default function Audiobook() {
   const [scanLogs, setScanLogs] = useState<string[]>([]);
   const [coverModal, setCoverModal] = useState<{ book: AudiobookItem; url: string } | null>(null);
   const [settingCover, setSettingCover] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<AudiobookItem | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -74,12 +75,16 @@ export default function Audiobook() {
     }
   };
 
-  const handleDelete = async (book: AudiobookItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`确定删除《${book.name}》？`)) return;
+  const handleDelete = async (deleteFiles: boolean) => {
+    if (!deleteModal) return;
     try {
-      await api.deleteAudiobook(book.id);
-      setStatus(`已删除《${book.name}》`);
+      await api.deleteAudiobook(deleteModal.id, deleteFiles);
+      if (deleteFiles) {
+        setStatus(`已删除《${deleteModal.name}》及原始文件`);
+      } else {
+        setStatus(`已从书架移除《${deleteModal.name}》`);
+      }
+      setDeleteModal(null);
       await loadBooks();
     } catch {
       setStatus("删除失败");
@@ -180,7 +185,7 @@ export default function Audiobook() {
                     🖼
                   </button>
                   <button
-                    onClick={(e) => handleDelete(book, e)}
+                    onClick={(e) => { e.stopPropagation(); setDeleteModal(book); }}
                     className="w-6 h-6 rounded-full bg-black/50 text-white text-[12px] flex items-center justify-center"
                   >
                     ×
@@ -220,6 +225,37 @@ export default function Audiobook() {
                 {settingCover ? "获取中..." : "确认"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {deleteModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setDeleteModal(null)}>
+          <div className="bg-white rounded-xl p-5 w-[90%] max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-[15px] font-medium text-[#1d1d1f] mb-2">删除有声书</h3>
+            <p className="text-[13px] text-[#86868b] mb-4">《{deleteModal.name}》</p>
+            <div className="space-y-2 mb-4">
+              <button
+                onClick={() => handleDelete(false)}
+                className="w-full px-3 py-2.5 text-[13px] text-left rounded-lg border border-black/10 hover:bg-black/5"
+              >
+                <span className="font-medium text-[#1d1d1f]">仅从书架移除</span>
+                <span className="block text-[11px] text-[#86868b] mt-0.5">保留原始文件，可重新扫描添加</span>
+              </button>
+              <button
+                onClick={() => handleDelete(true)}
+                className="w-full px-3 py-2.5 text-[13px] text-left rounded-lg border border-red-200 hover:bg-red-50"
+              >
+                <span className="font-medium text-red-600">删除原始文件</span>
+                <span className="block text-[11px] text-[#86868b] mt-0.5">同时删除磁盘上的音频文件，不可恢复</span>
+              </button>
+            </div>
+            <button
+              onClick={() => setDeleteModal(null)}
+              className="w-full px-3 py-1.5 text-[13px] text-[#86868b] hover:bg-black/5 rounded-lg"
+            >
+              取消
+            </button>
           </div>
         </div>
       )}

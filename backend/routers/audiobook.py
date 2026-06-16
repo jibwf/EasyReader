@@ -52,12 +52,16 @@ async def list_all():
     return books
 
 
+class DeleteAudiobookRequest(BaseModel):
+    delete_files: bool = False
+
+
 @router.delete("/{book_id}")
-async def delete(book_id: int):
-    deleted = await delete_audiobook(book_id)
-    if not deleted:
+async def delete(book_id: int, delete_files: bool = False):
+    result = await delete_audiobook(book_id, delete_files)
+    if not result["deleted"]:
         raise HTTPException(status_code=404, detail="Audiobook not found")
-    return {"deleted": True}
+    return result
 
 
 @router.post("/set-cover")

@@ -269,6 +269,10 @@ export default function Shelf() {
   };
 
   const handleBatchDelete = async () => {
+    const count = selectedIds.length || filteredBooks.length;
+    if (!window.confirm(`确定删除 ${count} 本书？\n\n此操作将删除书架记录、所有相关缓存数据（阅读进度、本地缓存等）以及磁盘上的原始文件。删除后不可恢复！`)) {
+      return;
+    }
     await runBatch(
       async () => {
         const result = await api.deleteBooksBatch(selectedIds);

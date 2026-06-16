@@ -483,15 +483,58 @@ async def list_audiobooks() -> list[BookSchema]:
     ]
 
 
-async def delete_audiobook(book_id: int) -> bool:
-    """Delete an audiobook record. Does not delete disk files."""
+async def delete_audiobook(book_id: int, delete_files: bool = False) -> dict:
+    """Delete an audiobook record and optionally delete disk files.
+    
+    Args:
+        book_id: Book ID to delete
+        delete_files: If True, also delete the media folder from disk
+        
+    Returns:
+        Dict with deletion result info
+    """
     db = await get_db()
+    
+    # Get book info before deletion
     cursor = await db.execute(
+        "SELECT id, name, media_root FROM books WHERE id = ? AND source_url = ?",
+        (book_id, AUDIobook_SOURCE_URL),
+    )
+    row = await cursor.fetchone()
+    if not row:
+        return {"deleted": False}
+    
+    book_name = row["name"]
+    media_root = row["media_root"]
+    
+    # Delete from database
+    await db.execute(
         "DELETE FROM books WHERE id = ? AND source_url = ?",
         (book_id, AUDIobook_SOURCE_URL),
     )
     await db.commit()
-    return cursor.rowcount > 0
+    
+    # Optionally delete files from disk
+    files_deleted = False
+    if delete_files and media_root:
+        audiobook_dir = settings.audiobook_dir
+        if media_root == "__root__":
+            target_dir = audiobook_dir
+        else:
+            target_dir = audiobook_dir / media_root
+        
+        if target_dir.exists():
+            import shutil
+            try:
+                if target_dir.is_dir():
+                    shutil.rmtree(target_dir)
+                else:
+                    target_dir.unlink()
+                files_deleted = True
+            except Exception:
+                pass
+    
+    return {"deleted": True, "name": book_name, "files_deleted": files_deleted}
 
 
 async def _get_book_id(db, book_url: str, source_url: str) -> int:
