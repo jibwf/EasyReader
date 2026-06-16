@@ -3,7 +3,8 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Chapter, type AudiobookManifest } from "@/api/client";
 import AudiobookControls from "@/components/reader/AudiobookControls";
 import { useAudiobookHistory } from "@/stores/audiobookHistory";
-import { HeadphonesIcon } from "@/components/icons";
+import { useAudiobookOffline } from "@/stores/audiobookOffline";
+import { HeadphonesIcon, DownloadIcon, CheckCircleIcon, XCircleIcon } from "@/components/icons";
 
 export default function AudiobookPlayer() {
   const [params] = useSearchParams();
@@ -94,10 +95,53 @@ export default function AudiobookPlayer() {
   }, [bookKey, loadBook]);
 
   const { addHistory, getHistory } = useAudiobookHistory();
+  const {
+    isChapterCached,
+    downloadChapter,
+    downloadEntireBook,
+    cancelDownload,
+    downloadProgress,
+    getBookCachedChapters
+  } = useAudiobookOffline();
 
   const hasVideo = manifest?.media_files.some((f) => f.media_type === "video") ?? false;
   const currentMedia = manifest?.media_files[0];
   const chapter = chapters.find((ch) => ch.idx === currentIdx);
+
+  // 边听边存：播放时自动缓存当前章节
+  useEffect(() => {
+    if (currentMedia && bookKey && chapter) {
+      const url = currentMedia.url;
+      // 异步缓存，不阻塞播放
+      downloadChapter(bookKey, chapter.idx, chapter.title, url).catch(() => {
+        // 忽略错误，不影响播放
+      });
+    }
+  }, [currentMedia, bookKey, chapter, downloadChapter]);
+
+  // 检查当前章节是否已缓存
+  const isCurrentChapterCached = chapter ? isChapterCached(bookKey, chapter.idx) : false;
+
+  // 获取已缓存的章节数量
+  const cachedChaptersCount = getBookCachedChapters(bookKey).length;
+
+  // 下载整本有声书
+  const handleDownloadBook = useCallback(async () => {
+    if (chapters.length === 0) return;
+    
+    const chaptersToDownload = chapters.map(ch => ({
+      idx: ch.idx,
+      title: ch.title,
+      url: ch.url
+    }));
+    
+    await downloadEntireBook(bookKey, chaptersToDownload);
+  }, [chapters, bookKey, downloadEntireBook]);
+
+  // 取消下载
+  const handleCancelDownload = useCallback(() => {
+    cancelDownload();
+  }, [cancelDownload]);
 
   // 在加载书籍时恢复播放进度
   useEffect(() => {
@@ -155,6 +199,35 @@ export default function AudiobookPlayer() {
           ← 返回
         </button>
         <span className="text-[14px] font-medium text-[#1d1d1f] truncate flex-1">{bookName}</span>
+        
+        {/* 离线状态和下载按钮 */}
+        <div className="flex items-center gap-2">
+          {isCurrentChapterCached && (
+            <span className="text-[12px] text-green-600 flex items-center gap-1">
+              <CheckCircleIcon size={14} />
+              已缓存
+            </span>
+          )}
+          
+          {downloadProgress && downloadProgress.status === 'downloading' ? (
+            <button
+              onClick={handleCancelDownload}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 text-red-600 text-[12px]"
+            >
+              <XCircleIcon size={14} />
+              取消下载
+            </button>
+          ) : (
+            <button
+              onClick={handleDownloadBook}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 text-blue-600 text-[12px]"
+              disabled={downloadProgress?.status === 'downloading'}
+            >
+              <DownloadIcon size={14} />
+              {cachedChaptersCount > 0 ? `已缓存 ${cachedChaptersCount}/${chapters.length}` : '下载整本'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="pt-14 pb-32 px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16">
@@ -209,6 +282,49 @@ export default function AudiobookPlayer() {
             >
               重试
             </button>
+          </div>
+        )}
+
+        {/* 下载进度显示 */}
+        {downloadProgress && downloadProgress.status === 'downloading' && (
+          <div className="mx-4 mt-4 p-3 rounded-lg bg-blue-50 border border-blue-200">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[13px] text-blue-600 font-medium">正在下载...</p>
+              <p className="text-[12px] text-blue-500">
+                {downloadProgress.downloadedChapters}/{downloadProgress.totalChapters}
+              </p>
+            </div>
+            <div className="w-full bg-blue-200 rounded-full h-2 mb-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{
+                  width: `${(downloadProgress.downloadedChapters / downloadProgress.totalChapters) * 100}%`
+                }}
+              />
+            </div>
+            <p className="text-[11px] text-blue-500 truncate">
+              当前: {downloadProgress.currentChapter}
+            </p>
+          </div>
+        )}
+
+        {/* 下载完成提示 */}
+        {downloadProgress && downloadProgress.status === 'completed' && (
+          <div className="mx-4 mt-4 p-3 rounded-lg bg-green-50 border border-green-200">
+            <p className="text-[13px] text-green-600 flex items-center gap-2">
+              <CheckCircleIcon size={16} />
+              下载完成！共缓存 {downloadProgress.totalChapters} 个章节
+            </p>
+          </div>
+        )}
+
+        {/* 下载错误提示 */}
+        {downloadProgress && downloadProgress.status === 'error' && (
+          <div className="mx-4 mt-4 p-3 rounded-lg bg-red-50 border border-red-200">
+            <p className="text-[13px] text-red-600 flex items-center gap-2">
+              <XCircleIcon size={16} />
+              下载失败: {downloadProgress.error}
+            </p>
           </div>
         )}
 
